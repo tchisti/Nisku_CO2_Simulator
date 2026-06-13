@@ -1,0 +1,1293 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SubsurfaceAI — Live CO2 Storage Simulator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--navy:#0b3954;--acc:#1f9bcf;--bg:#f2f5f7;--ok:#1e8e3e;--warn:#d93025}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#1a2733;font-size:14px}
+header{background:var(--navy);color:#fff;padding:12px 22px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}
+header h1{margin:0;font-size:18px}header .sub{font-size:11px;opacity:.75}
+nav{display:flex;background:#fff;border-bottom:2px solid var(--navy);flex-wrap:wrap}
+nav button{border:0;background:none;padding:11px 18px;font-size:13px;font-weight:bold;color:#555;cursor:pointer;border-bottom:3px solid transparent}
+nav button.on{color:var(--navy);border-bottom-color:var(--acc)}
+.tab{display:none;padding:16px 22px}.tab.on{display:block}
+.cols{display:flex;gap:16px;flex-wrap:wrap}.card{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.12);padding:14px 16px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:13px;color:var(--navy);text-transform:uppercase;letter-spacing:.4px}
+label{display:block;font-size:11px;color:#666;margin:7px 0 2px}
+input,select{width:100%;padding:5px 7px;border:1px solid #c5d0d8;border-radius:4px;font-size:13px}
+input:focus{outline:2px solid var(--acc)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px 10px}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:5px;padding:9px 16px;font-size:13px;font-weight:bold;cursor:pointer;margin:4px 4px 0 0}
+.btn:hover{filter:brightness(1.1)}.btn.gray{background:#5d7382}.btn.green{background:var(--ok)}.btn.red{background:var(--warn)}
+table{border-collapse:collapse;width:100%;font-size:12px;margin:8px 0}
+th{background:var(--navy);color:#fff;padding:5px 8px;text-align:left;font-size:11px}
+td{border-bottom:1px solid #e3e9ed;padding:4px 8px}td input{padding:3px 5px;font-size:12px}
+.kpis{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+.kpi{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.12);padding:10px 14px;min-width:130px}
+.kpi .v{font-size:19px;font-weight:bold;color:var(--navy)}.kpi .t{font-size:10px;color:#777;text-transform:uppercase}
+.kpi.bad .v{color:var(--warn)}.kpi.good .v{color:var(--ok)}
+canvas.map{background:#fff;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.12);width:100%;max-width:640px}
+.chartbox{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.12);padding:10px;height:300px;flex:1 1 440px}
+#log{background:#0d1f2b;color:#9fd6a0;font-family:monospace;font-size:11px;padding:10px;border-radius:6px;height:170px;overflow:auto;white-space:pre-wrap}
+.note{background:#fff3cd;border-left:4px solid #e0a800;padding:8px 12px;font-size:12px;margin:10px 0;border-radius:4px}
+.flex{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+progress{width:260px;height:14px}
+.pill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:bold}
+.pill.pass{background:#d7f0dd;color:var(--ok)}.pill.fail{background:#fbe0de;color:var(--warn)}.pill.info{background:#dceefb;color:var(--navy)}
+@media print{nav,header .sub,.noprint{display:none}.tab{display:block!important}}
+</style></head><body>
+<header><div><h1>Live CO2 Storage Simulator — Vertical-Equilibrium Engine</h1>
+<div class="sub">SubsurfaceAI | 2D depth-integrated two-phase CO2/brine FD simulator (Nordbotten–Celia VE class) | AER D065 / EPA Class VI screening &amp; AOR support</div></div>
+<div class="noprint"><button class="btn green" id="btnRunTop">▶ Run</button></div></header>
+<nav id="nav">
+<button data-t="setup" class="on">1 · Model Setup</button><button data-t="run">2 · Run</button>
+<button data-t="maps">3 · Map View</button><button data-t="xsec">4 · Cross-Section</button>
+<button data-t="series">5 · Time Series</button><button data-t="sens">6 · Sensitivity</button>
+<button data-t="reg">7 · Regulatory</button><button data-t="exp">8 · Export / Report</button>
+</nav>
+
+<div class="tab on" id="tab-setup">
+<div class="note"><b>Physics envelope:</b> depth-integrated vertical-equilibrium sharp-interface two-phase flow with Land residual trapping and equilibrium dissolution — the model class used for CCS screening and AOR delineation (accepted in EPA Class VI AoR evaluations and AER D065 supporting analyses). For the full 3D compositional containment demonstration, pair with the CMG-GEM decks (<code>Wabamun_Nisku_CCS_V8*.dat</code>) built alongside this tool.</div>
+<div class="flex noprint"><button class="btn" id="btnPreset">Load Nisku V8 Preset (Wabamun)</button>
+<button class="btn gray" id="btnSaveModel">Save model (.json)</button>
+<label style="display:inline;width:auto" class="btn gray">Load model (.json)<input type="file" id="fileModel" accept=".json" style="display:none"></label></div>
+<div class="cols">
+<div style="flex:1 1 260px"><div class="card"><h3>Grid &amp; Geometry</h3><div class="grid2">
+<div><label>Domain size (m)</label><input id="L_m" type="number" value="10000"></div>
+<div><label>Grid NX=NY</label><input id="NX" type="number" value="50"></div>
+<div><label>Thickness H (m)</label><input id="H" type="number" value="50"></div>
+<div><label>Top depth (m)</label><input id="depth" type="number" value="1250"></div>
+<div><label>Engine</label><select id="eng"><option value="ve">2D VE (fast)</option><option value="3d">3D layered (gravity)</option></select></div>
+<div><label>NZ layers (3D)</label><input id="NZ" type="number" value="10"></div>
+</div><div style="font-size:11px;color:#888;margin-top:6px">3D: NX ≤ 40 recommended (runtime ~10–60 s). 2D VE: NX 50+ fine.</div></div>
+<div class="card"><h3>Rock</h3><div class="grid2">
+<div><label>Porosity φ</label><input id="phi" type="number" step="0.001" value="0.0761"></div>
+<div><label>Perm kh (mD)</label><input id="k_mD" type="number" value="1311"></div>
+<div><label>Net-to-gross</label><input id="ntg" type="number" step="0.01" value="0.70"></div>
+<div><label>Rock compr. (1/kPa)</label><input id="cr" type="number" step="1e-8" value="5e-7"></div>
+<div><label>Heterogeneity ±%</label><input id="het" type="number" value="0"></div>
+<div><label>Random seed</label><input id="seed" type="number" value="42"></div>
+</div></div>
+<div class="card" id="cardLayers"><h3>3D Layer Stack (K1 top → KN base) <button id="btnNiskuLayers" class="btn noprint" style="float:right;padding:3px 10px">Nisku 10-layer</button></h3>
+<table id="tblLayers"><thead><tr><th>K</th><th>φ</th><th>kh (mD)</th></tr></thead><tbody></tbody></table>
+<div style="font-size:11px;color:#666">Used when Engine = 3D. Kv/Kh: <input id="kvkh" style="width:70px;display:inline" value="0.155"></div></div></div>
+<div style="flex:1 1 260px"><div class="card"><h3>Initial Conditions &amp; Fluids</h3><div class="grid2">
+<div><label>P initial (kPa)</label><input id="P0" type="number" value="12263"></div>
+<div><label>T (°C)</label><input id="T_C" type="number" value="55"></div>
+<div><label>Brine TDS (ppm)</label><input id="tds" type="number" value="150000"></div>
+<div><label>ρCO2 override (kg/m³, 0=auto)</label><input id="rhoOv" type="number" value="0"></div>
+</div><div id="fluidInfo" style="font-size:11px;color:#555;margin-top:8px"></div></div>
+<div class="card"><h3>Relative Permeability &amp; Trapping</h3><div class="grid2">
+<div><label>Swi</label><input id="swi" type="number" step="0.01" value="0.22"></div>
+<div><label>Sgr max (Land)</label><input id="sgr" type="number" step="0.01" value="0.12"></div>
+<div><label>krg max</label><input id="krg" type="number" step="0.01" value="0.80"></div>
+<div><label>Frac gradient (kPa/m)</label><input id="fg" type="number" value="20"></div>
+</div></div>
+<div class="card"><h3>Schedule &amp; Boundary</h3><div class="grid3">
+<div><label>Injection (yr)</label><input id="injY" type="number" value="10"></div>
+<div><label>Total (yr)</label><input id="totY" type="number" value="15"></div>
+<div><label>Report step (d)</label><input id="repD" type="number" value="30"></div>
+</div><label>Lateral boundary</label><select id="bnd"><option value="1">Open (infinite aquifer)</option><option value="0">Closed (sealed)</option></select></div></div>
+<div style="flex:1 1 380px"><div class="card"><h3>Injection Wells <button class="btn noprint" style="float:right;padding:3px 10px" id="btnAddWell">+ add</button></h3>
+<table id="tblWells"><thead><tr><th>Name</th><th>x (m)</th><th>y (m)</th><th>Mt/yr</th><th>start yr</th><th>stop yr</th><th>BHPmax kPa</th><th></th></tr></thead><tbody></tbody></table>
+<div style="font-size:11px;color:#666">Total capacity: <b id="capTot"></b></div></div>
+<div class="card"><h3>Monitoring Wells <button class="btn noprint" style="float:right;padding:3px 10px" id="btnAddMon">+ add</button></h3>
+<table id="tblMons"><thead><tr><th>Name</th><th>x (m)</th><th>y (m)</th><th></th></tr></thead><tbody></tbody></table></div></div>
+</div></div>
+
+<div class="tab" id="tab-run">
+<div class="flex noprint"><button class="btn green" id="btnRun">▶ Run simulation</button>
+<progress id="prog" value="0" max="100"></progress><span id="runStat">idle</span></div>
+<div class="kpis" id="runKpis"></div><div id="log">Ready. Configure the model, then Run.</div></div>
+
+<div class="tab" id="tab-maps">
+<div class="flex noprint"><label style="width:auto">Property</label>
+<select id="mapProp" style="width:auto"><option value="sg">Gas saturation SG</option><option value="dp">ΔP (kPa)</option><option value="diss">Dissolved CO2 (kg/m²)</option></select>
+<label style="width:auto">Layer</label><select id="mapK" style="width:auto"><option value="-1">Max over K</option></select>
+<label style="width:auto">Time</label><input id="mapT" type="range" min="0" max="0" value="0" style="width:240px"><span id="mapTlab"></span></div>
+<canvas id="cvMap" class="map" width="760" height="800"></canvas></div>
+
+<div class="tab" id="tab-xsec">
+<div class="flex noprint"><label style="width:auto">Through well</label><select id="xsWell" style="width:auto"></select>
+<label style="width:auto">Direction</label><select id="xsDir" style="width:auto"><option value="x">W–E</option><option value="y">S–N</option></select>
+<label style="width:auto">Time</label><input id="xsT" type="range" min="0" max="0" value="0" style="width:240px"><span id="xsTlab"></span></div>
+<canvas id="cvXs" class="map" width="900" height="380"></canvas>
+<div style="font-size:11px;color:#666">VE reconstruction: CO2 column thickness h = Sg·H/(1−Swi) drawn from formation top (gravity override).</div></div>
+
+<div class="tab" id="tab-series"><div class="cols">
+<div class="chartbox"><canvas id="chMass"></canvas></div><div class="chartbox"><canvas id="chBhp"></canvas></div>
+<div class="chartbox"><canvas id="chRad"></canvas></div><div class="chartbox"><canvas id="chMon"></canvas></div></div></div>
+
+<div class="tab" id="tab-sens">
+<div class="note">One-at-a-time sensitivity on a coarsened grid (NX 40). Metrics: plume radius at end of injection and max BHP. Select parameters and run.</div>
+<div class="flex noprint" id="sensChecks"></div>
+<div class="flex noprint"><button class="btn" id="btnSens">Run sensitivity</button><progress id="sProg" value="0" max="100"></progress></div>
+<canvas id="cvTor" class="map" width="860" height="420"></canvas><div id="sensTbl"></div></div>
+
+<div class="tab" id="tab-reg"><div id="regOut"><p>Run the simulation first.</p></div></div>
+
+<div class="tab" id="tab-exp">
+<div class="card"><h3>Data downloads (CSV — universal format)</h3>
+<button class="btn" id="dlHist">Time-series history</button>
+<button class="btn" id="dlAor">AOR table</button>
+<button class="btn" id="dlGrid">Field snapshot grids (SG, P)</button>
+<button class="btn" id="dlWells">Well performance</button>
+<button class="btn gray" id="dlModel">Model definition (.json)</button></div>
+<div class="card"><h3>Report</h3>
+<p style="font-size:12px">Generates a print-ready regulatory summary (parameters, results, compliance tables, figures). Use the browser print dialog → Save as PDF.</p>
+<button class="btn green" id="btnReport">Generate report (PDF via print)</button></div></div>
+<script>
+/* =====================================================================
+   SubsurfaceAI — Live CO2 Storage Simulator: VE ENGINE (pure JS)
+   Physics: 2D depth-integrated (vertical-equilibrium sharp-interface)
+   two-phase CO2/brine flow. Implicit pressure (PCG) + explicit upwind
+   fractional-flow transport + VE gravity spreading + Land residual
+   trapping + equilibrium dissolution. Multi-well, rate/BHP control.
+   Lineage: Nordbotten & Celia (2005) VE theory; MRST-VE class.
+   Author: Roomi (P.Eng.) | SubsurfaceAI
+   ===================================================================== */
+"use strict";
+
+/* ---------- fluid property correlations ---------- */
+const CO2Props = {
+  // Span-Wagner-anchored density table, kg/m3 [T degC][P MPa]
+  T: [30, 40, 50, 60, 70, 80],
+  P: [8, 10, 12, 15, 20, 25, 30],
+  RHO: [
+    [686, 772, 800, 830, 870, 900, 925],
+    [278, 629, 718, 780, 840, 880, 910],
+    [219, 384, 585, 700, 785, 835, 870],
+    [192, 290, 435, 604, 724, 787, 830],
+    [174, 248, 343, 510, 662, 738, 790],
+    [161, 221, 291, 428, 594, 686, 745]],
+  rho(P_kPa, T_C) {
+    const P = Math.min(Math.max(P_kPa / 1000, 8), 30),
+          T = Math.min(Math.max(T_C, 30), 80);
+    let i = 0; while (i < this.T.length - 2 && T > this.T[i + 1]) i++;
+    let j = 0; while (j < this.P.length - 2 && P > this.P[j + 1]) j++;
+    const ft = (T - this.T[i]) / (this.T[i + 1] - this.T[i]),
+          fp = (P - this.P[j]) / (this.P[j + 1] - this.P[j]);
+    return (1 - ft) * ((1 - fp) * this.RHO[i][j] + fp * this.RHO[i][j + 1]) +
+           ft * ((1 - fp) * this.RHO[i + 1][j] + fp * this.RHO[i + 1][j + 1]);
+  },
+  visc(rho) { return (0.015 + 2.0e-5 * rho + 5.2e-8 * rho * rho) * 1e-3; } // Pa.s (Fenghour-fit)
+};
+const BrineProps = {
+  rho(T_C, tds_ppm) { return 1000 - 0.40 * (T_C - 20) + 7.0e-4 * tds_ppm; },
+  visc(T_C, tds_ppm) {
+    const muw = 2.414e-5 * Math.pow(10, 247.8 / (T_C + 133.15));
+    return muw * (1 + 2.0e-6 * tds_ppm);
+  },
+  // equilibrium dissolved CO2 mass fraction (kg CO2 / kg brine), Duan-anchored scaling
+  wCO2eq(P_kPa, T_C, tds_ppm) {
+    const m = tds_ppm / 58440 * 1.07;                       // ~molality
+    const base = 0.050 * Math.pow(P_kPa / 12300, 0.55) *
+                 (1 - 0.0045 * (T_C - 55)) * Math.exp(-0.12 * m);
+    return Math.max(0.005, Math.min(base, 0.06));
+  }
+};
+
+/* ---------- engine ---------- */
+class VESim {
+  constructor(p) {
+    // p: {L_m, NX, H, depth, phi, k_mD, kvkh, ntg, cr_perkPa, P0_kPa, T_C,
+    //     tds_ppm, swi, sgrmax, krgmax, fracGrad_kPam, openBoundary,
+    //     hetero_pct, seed, rhoCO2_override,
+    //     wells:[{x_m,y_m,rate_MtYr,startYr,stopYr,bhpMax_kPa,name}],
+    //     monitors:[{x_m,y_m,name}], injYears, totalYears, reportDays}
+    this.p = p;
+    const N = p.NX; this.N = N; this.NC = N * N;
+    this.dx = p.L_m / N;
+    this.rhoG = p.rhoCO2_override > 0 ? p.rhoCO2_override : CO2Props.rho(p.P0_kPa, p.T_C);
+    this.muG = CO2Props.visc(this.rhoG);
+    this.rhoB = BrineProps.rho(p.T_C, p.tds_ppm);
+    this.muB = BrineProps.visc(p.T_C, p.tds_ppm);
+    this.wEq = BrineProps.wCO2eq(p.P0_kPa, p.T_C, p.tds_ppm);
+    this.k = new Float64Array(this.NC).fill(p.k_mD * 9.869233e-16);  // m2
+    this.phi = new Float64Array(this.NC).fill(p.phi);
+    if (p.hetero_pct > 0) {                                   // log-normal-ish perturbation
+      let s = p.seed || 42;
+      const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+      for (let c = 0; c < this.NC; c++) {
+        const f = 1 + (rnd() * 2 - 1) * p.hetero_pct / 100;
+        this.k[c] *= f * f; this.phi[c] *= Math.min(Math.max(f, 0.6), 1.4);
+      }
+    }
+    this.P = new Float64Array(this.NC).fill(p.P0_kPa * 1e3);  // Pa
+    this.Sg = new Float64Array(this.NC);
+    this.SgMax = new Float64Array(this.NC);
+    this.mDiss = new Float64Array(this.NC);
+    this.Vp = new Float64Array(this.NC);
+    for (let c = 0; c < this.NC; c++)
+      this.Vp[c] = this.dx * this.dx * p.H * p.ntg * this.phi[c];
+    this.ct = (p.cr_perkPa + 4.6e-7) * 1e-3;                  // 1/Pa
+    this.LandC = 1 / p.sgrmax - 1 / (1 - p.swi);
+    this.wells = p.wells.map(w => ({...w,
+      c: this.cellAt(w.x_m, w.y_m), q: 0, bhp: p.P0_kPa * 1e3, cum: 0}));
+    this.monitors = (p.monitors || []).map(m => ({...m, c: this.cellAt(m.x_m, m.y_m)}));
+    this.t = 0; this.injTot = 0;
+    this.history = []; this.snapshots = [];
+    this.fracP = p.fracGrad_kPam * p.depth * 1e3;             // Pa
+    this.warnings = [];
+  }
+  cellAt(x, y) {
+    const i = Math.min(this.N - 1, Math.max(0, Math.floor(x / this.dx))),
+          j = Math.min(this.N - 1, Math.max(0, Math.floor(y / this.dx)));
+    return j * this.N + i;
+  }
+  mobile(c) {  // mobile gas saturation after Land trapping
+    const sg = this.Sg[c], smax = this.SgMax[c];
+    if (sg >= smax - 1e-12) return sg;                        // drainage branch
+    const sgt = Math.min(smax / (1 + this.LandC * smax), sg);
+    return Math.max(sg - sgt, 0);
+  }
+  lambdas(c) {  // VE-linear effective mobilities
+    const p = this.p, sgm = this.mobile(c), sFrac = Math.min(sgm / (1 - p.swi), 1);
+    const lg = p.krgmax * sFrac / this.muG;
+    const lw = Math.max(1 - this.Sg[c] / (1 - p.swi), 0) / this.muB;
+    return [lg, lw];
+  }
+  faceT(a, b) {  // geometric transmissibility, harmonic k
+    const kh = 2 * this.k[a] * this.k[b] / (this.k[a] + this.k[b] + 1e-30);
+    return kh * this.p.H * this.p.ntg;                        // *(dy/dx)=1 uniform
+  }
+  solvePressure(dt) {
+    const N = this.N, NC = this.NC, diag = new Float64Array(NC),
+          rhs = new Float64Array(NC), TE = new Float64Array(NC),
+          TN = new Float64Array(NC);
+    for (let c = 0; c < NC; c++) {
+      const acc = this.dx * this.dx * this.p.H * this.p.ntg * this.phi[c] * this.ct / dt;
+      diag[c] = acc; rhs[c] = acc * this.P[c];
+    }
+    for (let c = 0; c < NC; c++) {
+      const i = c % N, j = (c / N) | 0;
+      if (i < N - 1) {
+        const n = c + 1, lt = 0.5 * (this.lamT(c) + this.lamT(n)),
+              T = this.faceT(c, n) * lt;
+        TE[c] = T; diag[c] += T; diag[n] += T;
+      }
+      if (j < N - 1) {
+        const n = c + N, lt = 0.5 * (this.lamT(c) + this.lamT(n)),
+              T = this.faceT(c, n) * lt;
+        TN[c] = T; diag[c] += T; diag[n] += T;
+      }
+      if (this.p.openBoundary && (i === 0 || i === N - 1 || j === 0 || j === N - 1)) {
+        const Tb = this.faceT(c, c) * this.lamT(c) * 2;       // Dirichlet to P0
+        diag[c] += Tb; rhs[c] += Tb * this.p.P0_kPa * 1e3;
+      }
+    }
+    for (const w of this.wells) if (w.q > 0) rhs[w.c] += w.q; // q in m3/s reservoir
+    // PCG with Jacobi preconditioner
+    const Ax = (x, out) => {
+      for (let c = 0; c < NC; c++) out[c] = diag[c] * x[c];
+      for (let c = 0; c < NC; c++) {
+        if (TE[c]) { out[c] -= TE[c] * x[c + 1]; out[c + 1] -= TE[c] * x[c]; }
+        if (TN[c]) { out[c] -= TN[c] * x[c + N]; out[c + N] -= TN[c] * x[c]; }
+      }
+    };
+    const x = Float64Array.from(this.P), r = new Float64Array(NC),
+          z = new Float64Array(NC), q = new Float64Array(NC);
+    Ax(x, r); for (let c = 0; c < NC; c++) r[c] = rhs[c] - r[c];
+    for (let c = 0; c < NC; c++) z[c] = r[c] / diag[c];
+    let d = Float64Array.from(z), rz = 0;
+    for (let c = 0; c < NC; c++) rz += r[c] * z[c];
+    const tol = Math.max(1e-12 * Math.abs(rz), 1e-20);
+    for (let it = 0; it < 500 && rz > tol; it++) {
+      Ax(d, q); let dq = 0;
+      for (let c = 0; c < NC; c++) dq += d[c] * q[c];
+      const al = rz / (dq + 1e-300);
+      for (let c = 0; c < NC; c++) { x[c] += al * d[c]; r[c] -= al * q[c]; }
+      let rz2 = 0;
+      for (let c = 0; c < NC; c++) { z[c] = r[c] / diag[c]; rz2 += r[c] * z[c]; }
+      const be = rz2 / (rz + 1e-300); rz = rz2;
+      for (let c = 0; c < NC; c++) d[c] = z[c] + be * d[c];
+    }
+    this.P = x;
+    this.TE = TE; this.TN = TN;
+  }
+  lamT(c) { const [lg, lw] = this.lambdas(c); return lg + lw; }
+  step(dtDays) {
+    const p = this.p, N = this.N, dt = dtDays * 86400, yr = this.t / 365.25;
+    // well control: rate target, capped by BHP
+    for (const w of this.wells) {
+      const active = yr >= (w.startYr || 0) && yr < (w.stopYr ?? p.injYears);
+      if (!active) { w.q = 0; w.bhp = this.P[w.c]; continue; }
+      const qMass = w.rate_MtYr * 1e9 / (365.25 * 86400);     // kg/s
+      let q = qMass / this.rhoG;                              // m3/s
+      const WI = 2 * Math.PI * this.k[w.c] * p.H * p.ntg /
+                 Math.log(0.2 * this.dx / (w.rw || 0.1));
+      const lamInj = p.krgmax / this.muG;
+      let bhp = this.P[w.c] + q / (WI * lamInj);
+      const bhpMax = (w.bhpMax_kPa || 1e9) * 1e3;
+      if (bhp > bhpMax) {                                     // switch to BHP control
+        q = Math.max(WI * lamInj * (bhpMax - this.P[w.c]), 0);
+        bhp = bhpMax;
+        this.warnings.push(`Yr ${yr.toFixed(1)}: ${w.name} BHP-limited`);
+      }
+      w.q = q; w.bhp = bhp;
+      const dm = q * this.rhoG * dt;
+      w.cum += dm; this.injTot += dm;
+    }
+    this.solvePressure(dt);
+    // explicit saturation transport with CFL substeps
+    let nSub = 1, maxV = 0;
+    for (let c = 0; c < this.NC; c++) {
+      const i = c % N;
+      if (i < N - 1 && this.TE[c]) maxV = Math.max(maxV,
+        Math.abs(this.TE[c] * (this.P[c] - this.P[c + 1])) / this.Vp[c]);
+      if (this.TN && this.TN[c]) maxV = Math.max(maxV,
+        Math.abs(this.TN[c] * (this.P[c] - this.P[c + N])) / this.Vp[c]);
+    }
+    nSub = Math.min(Math.max(Math.ceil(maxV * dt / 0.25), 1), 60);
+    const dts = dt / nSub;
+    const gravC = (this.rhoB - this.rhoG) * 9.81;
+    for (let s = 0; s < nSub; s++) {
+      const dS = new Float64Array(this.NC);
+      for (let c = 0; c < this.NC; c++) {
+        const i = c % N, j = (c / N) | 0;
+        for (const [n, T] of [[c + 1, i < N - 1 ? this.TE[c] : 0],
+                              [c + N, j < N - 1 ? this.TN[c] : 0]]) {
+          if (!T) continue;
+          const F = T * (this.P[c] - this.P[n]);              // total flux c->n (m3/s *lamT already)
+          const up = F >= 0 ? c : n;
+          const [lg, lw] = this.lambdas(up);
+          const fg = lg / (lg + lw + 1e-30);
+          const Fg = fg * F;
+          dS[c] -= Fg * dts / this.Vp[c]; dS[n] += Fg * dts / this.Vp[n];
+          // VE gravity spreading: flux ~ k*krg*dRho*g/muG * d(h)/dx * h_face * dy * phi-free
+          const hC = this.Sg[c] / (1 - p.swi) * p.H, hN = this.Sg[n] / (1 - p.swi) * p.H;
+          if (hC > 0 || hN > 0) {
+            const kf = 2 * this.k[c] * this.k[n] / (this.k[c] + this.k[n] + 1e-30);
+            const Fgr = kf * p.krgmax / this.muG * gravC *
+                        0.5 * (hC + hN) * (hC - hN) / this.dx * this.dx * p.ntg;
+            const lim = 0.2 * Math.min(this.Vp[c], this.Vp[n]) / dts; // stability cap
+            const Fg2 = Math.max(Math.min(Fgr, lim), -lim);
+            dS[c] -= Fg2 * dts / this.Vp[c] * (1 - p.swi) / p.H * 1;
+            dS[n] += Fg2 * dts / this.Vp[n] * (1 - p.swi) / p.H * 1;
+          }
+        }
+      }
+      for (const w of this.wells) if (w.q > 0) dS[w.c] += w.q * dts / this.Vp[w.c];
+      for (let c = 0; c < this.NC; c++) {
+        this.Sg[c] = Math.min(Math.max(this.Sg[c] + dS[c], 0), 1 - p.swi);
+        if (this.Sg[c] > this.SgMax[c]) this.SgMax[c] = this.Sg[c];
+      }
+    }
+    // dissolution (rate-limited approach to equilibrium)
+    const kDiss = 0.10;                                       // fraction of deficit per 30 d
+    for (let c = 0; c < this.NC; c++) {
+      if (this.Sg[c] <= 0 && this.mDiss[c] <= 0) continue;
+      const brineMass = this.Vp[c] * (1 - this.Sg[c]) / Math.max(this.phi[c],1e-9) * this.phi[c] * this.rhoB;
+      const cap = Math.max(brineMass * this.wEq - this.mDiss[c], 0);
+      const avail = this.Sg[c] * this.Vp[c] * this.rhoG;
+      const dm = Math.min(cap * kDiss * dtDays / 30, avail);
+      if (dm > 0) { this.mDiss[c] += dm; this.Sg[c] -= dm / (this.Vp[c] * this.rhoG); }
+    }
+    this.t += dtDays;
+  }
+  metrics() {
+    const p = this.p; let free = 0, trap = 0, diss = 0, pmax = 0, dpMax = 0;
+    let rMax = 0, area = 0;
+    const w0 = this.wells[0], xi = w0 ? (w0.c % this.N + 0.5) * this.dx : p.L_m / 2,
+          yi = w0 ? (((w0.c / this.N) | 0) + 0.5) * this.dx : p.L_m / 2;
+    for (let c = 0; c < this.NC; c++) {
+      const sgm = this.mobile(c), sgt = this.Sg[c] - sgm;
+      free += sgm * this.Vp[c] * this.rhoG;
+      trap += sgt * this.Vp[c] * this.rhoG;
+      diss += this.mDiss[c];
+      pmax = Math.max(pmax, this.P[c]);
+      dpMax = Math.max(dpMax, this.P[c] - p.P0_kPa * 1e3);
+      if (this.Sg[c] > 0.01) {
+        area += this.dx * this.dx;
+        const x = (c % this.N + 0.5) * this.dx, y = (((c / this.N) | 0) + 0.5) * this.dx;
+        rMax = Math.max(rMax, Math.hypot(x - xi, y - yi));
+      }
+    }
+    const tot = free + trap + diss;
+    return {
+      t_yr: this.t / 365.25, inj_Mt: this.injTot / 1e9,
+      free_Mt: free / 1e9, trap_Mt: trap / 1e9, diss_Mt: diss / 1e9,
+      mbe_pct: this.injTot > 0 ? 100 * (tot - this.injTot) / this.injTot : 0,
+      pmax_MPa: pmax / 1e6, dpMax_MPa: dpMax / 1e6,
+      plumeR_km: rMax / 1e3, plumeRequiv_km: Math.sqrt(area / Math.PI) / 1e3,
+      wells: this.wells.map(w => ({name: w.name, q_td: w.q * this.rhoG * 86.4,
+        bhp_MPa: w.bhp / 1e6, cum_Mt: w.cum / 1e9})),
+      monitors: this.monitors.map(m => ({name: m.name,
+        P_MPa: this.P[m.c] / 1e6, Sg: this.Sg[m.c]}))
+    };
+  }
+  run(onReport) {
+    const p = this.p, rep = p.reportDays || 30;
+    const totDays = p.totalYears * 365.25;
+    this.history.push(this.metrics());
+    while (this.t < totDays - 0.1) {
+      this.step(Math.min(rep, totDays - this.t));
+      const m = this.metrics();
+      this.history.push(m);
+      if (onReport) onReport(m, this);
+    }
+    return this.history;
+  }
+}
+/* Theis analytic pressure AOR (far-field, beyond grid) */
+function theisAOR(p, t_yr, thresh_kPa, totalRate_MtYr) {
+  const rhoG = p.rhoCO2_override > 0 ? p.rhoCO2_override : CO2Props.rho(p.P0_kPa, p.T_C);
+  const Q = totalRate_MtYr * 1e9 / (365.25 * 86400) / rhoG;
+  const k = p.k_mD * 9.869233e-16, muB = BrineProps.visc(p.T_C, p.tds_ppm);
+  const ct = (p.cr_perkPa + 4.6e-7) * 1e-3, t = t_yr * 365.25 * 86400;
+  const pre = Q * muB / (4 * Math.PI * k * p.H * p.ntg);      // Pa
+  const W = thresh_kPa * 1e3 / pre;                           // required W(u)
+  if (W <= 0) return Infinity;
+  const u = Math.exp(-W - 0.5772);                            // W(u)~ -g -ln u
+  return Math.sqrt(4 * k / (p.phi * muB * ct) * t * u);       // m
+}
+
+class Sim3D {
+  constructor(p) {
+    // extra params vs VESim: NZ, layers:[{phi,k_mD}] (len NZ), nw, ng
+    this.p = p;
+    const N = p.NX, NZ = p.NZ || 10;
+    this.N = N; this.NZ = NZ; this.NC = N * N * NZ; this.NA = N * N;
+    this.dx = p.L_m / N; this.dz = p.H / NZ;
+    this.rhoG = p.rhoCO2_override > 0 ? p.rhoCO2_override : CO2Props.rho(p.P0_kPa, p.T_C);
+    this.muG = CO2Props.visc(this.rhoG);
+    this.rhoB = BrineProps.rho(p.T_C, p.tds_ppm);
+    this.muB = BrineProps.visc(p.T_C, p.tds_ppm);
+    this.wEq = BrineProps.wCO2eq(p.P0_kPa, p.T_C, p.tds_ppm);
+    this.nw = p.nw || 4.0; this.ng = p.ng || 2.0;
+    const layers = p.layers && p.layers.length === NZ ? p.layers
+      : Array.from({length: NZ}, () => ({phi: p.phi, k_mD: p.k_mD}));
+    this.kh = new Float64Array(this.NC); this.kv = new Float64Array(this.NC);
+    this.phi = new Float64Array(this.NC); this.Vp = new Float64Array(this.NC);
+    let s = p.seed || 42;
+    const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    for (let k = 0; k < NZ; k++) for (let a = 0; a < this.NA; a++) {
+      const c = k * this.NA + a;
+      let f = 1;
+      if (p.hetero_pct > 0) f = 1 + (rnd() * 2 - 1) * p.hetero_pct / 100;
+      this.kh[c] = layers[k].k_mD * 9.869233e-16 * f * f;
+      this.kv[c] = this.kh[c] * (p.kvkh || 0.155);
+      this.phi[c] = Math.min(Math.max(layers[k].phi * f, 0.005), 0.35);
+      this.Vp[c] = this.dx * this.dx * this.dz * (p.ntg || 1) * this.phi[c];
+    }
+    this.zc = Array.from({length: NZ}, (_, k) => p.depth + (k + 0.5) * this.dz);
+    this.P = new Float64Array(this.NC);
+    for (let k = 0; k < NZ; k++) for (let a = 0; a < this.NA; a++)
+      this.P[k * this.NA + a] = p.P0_kPa * 1e3 + this.rhoB * 9.81 * (this.zc[k] - p.depth);
+    this.Pbnd = Float64Array.from(this.P);                      // boundary profile
+    this.Sg = new Float64Array(this.NC);
+    this.SgMax = new Float64Array(this.NC);
+    this.mDiss = new Float64Array(this.NC);
+    this.ct = (p.cr_perkPa + 4.6e-7) * 1e-3;
+    this.LandC = 1 / p.sgrmax - 1 / (1 - p.swi);
+    this.wells = p.wells.map(w => {
+      const i = Math.min(N - 1, Math.max(0, Math.floor(w.x_m / this.dx))),
+            j = Math.min(N - 1, Math.max(0, Math.floor(w.y_m / this.dx)));
+      const WI = [];
+      for (let k = 0; k < NZ; k++)
+        WI.push(2 * Math.PI * this.kh[k * this.NA + j * N + i] * this.dz /
+                Math.log(0.2 * this.dx / (w.rw || 0.1)));
+      return {...w, i, j, WI, q: 0, bhp: p.P0_kPa * 1e3, cum: 0};
+    });
+    this.monitors = (p.monitors || []).map(m => {
+      const i = Math.min(N - 1, Math.max(0, Math.floor(m.x_m / this.dx))),
+            j = Math.min(N - 1, Math.max(0, Math.floor(m.y_m / this.dx)));
+      return {...m, i, j};
+    });
+    this.t = 0; this.injTot = 0; this.history = []; this.warnings = [];
+    this.fracP = p.fracGrad_kPam * p.depth * 1e3;
+  }
+  mobSg(c) {
+    const sg = this.Sg[c], smax = this.SgMax[c];
+    if (sg >= smax - 1e-12) return sg;
+    const sgt = Math.min(smax / (1 + this.LandC * smax), sg);
+    return Math.max(sg - sgt, 0);
+  }
+  lam(c) {
+    const p = this.p, sgm = this.mobSg(c);
+    const se = Math.min(sgm / (1 - p.swi), 1);
+    const sw = Math.min(Math.max((1 - this.Sg[c] - p.swi) / (1 - p.swi), 0), 1);
+    return [p.krgmax * Math.pow(se, this.ng) / this.muG,
+            0.30 * Math.pow(sw, this.nw) / this.muB * (1 / 0.30)];
+    // krw_max normalized to 1.0 at Sw=1 (brine endpoint), Corey nw
+  }
+  idx(i, j, k) { return k * this.NA + j * this.N + i; }
+  solveP(dt) {
+    const N = this.N, NZ = this.NZ, NA = this.NA, NC = this.NC;
+    const diag = new Float64Array(NC), rhs = new Float64Array(NC);
+    const TE = new Float64Array(NC), TN = new Float64Array(NC), TT = new Float64Array(NC);
+    const g = 9.81, ntg = this.p.ntg || 1;
+    for (let c = 0; c < NC; c++) {
+      const acc = this.dx * this.dx * this.dz * ntg * this.phi[c] * this.ct / dt;
+      diag[c] = acc; rhs[c] = acc * this.P[c];
+    }
+    const lamArr = new Float64Array(NC), lgArr = new Float64Array(NC), lwArr = new Float64Array(NC);
+    for (let c = 0; c < NC; c++) { const [lg, lw] = this.lam(c);
+      lgArr[c] = lg; lwArr[c] = lw; lamArr[c] = lg + lw; }
+    this.lgArr = lgArr; this.lwArr = lwArr;
+    for (let k = 0; k < NZ; k++) for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const c = this.idx(i, j, k);
+      if (i < N - 1) { const n = c + 1;
+        const kf = 2 * this.kh[c] * this.kh[n] / (this.kh[c] + this.kh[n] + 1e-30);
+        const T = kf * this.dz * ntg * 0.5 * (lamArr[c] + lamArr[n]);
+        TE[c] = T; diag[c] += T; diag[n] += T; }
+      if (j < N - 1) { const n = c + N;
+        const kf = 2 * this.kh[c] * this.kh[n] / (this.kh[c] + this.kh[n] + 1e-30);
+        const T = kf * this.dz * ntg * 0.5 * (lamArr[c] + lamArr[n]);
+        TN[c] = T; diag[c] += T; diag[n] += T; }
+      if (k < NZ - 1) { const n = c + NA;                       // n is DEEPER
+        const kf = 2 * this.kv[c] * this.kv[n] / (this.kv[c] + this.kv[n] + 1e-30);
+        const T = kf * this.dx * this.dx / this.dz * 0.5 * (lamArr[c] + lamArr[n]);
+        TT[c] = T; diag[c] += T; diag[n] += T;
+        // gravity: face density mobility-weighted
+        const rf = (lgArr[c] + lgArr[n]) * this.rhoG + (lwArr[c] + lwArr[n]) * this.rhoB;
+        const lf = lgArr[c] + lgArr[n] + lwArr[c] + lwArr[n] + 1e-30;
+        const grav = T * (rf / lf) * g * this.dz;               // Pa driving downward
+        rhs[c] -= grav; rhs[n] += grav;
+      }
+      if (this.p.openBoundary && (i === 0 || i === N - 1 || j === 0 || j === N - 1)) {
+        const Tb = 2 * this.kh[c] * this.dz * ntg * lamArr[c];
+        diag[c] += Tb; rhs[c] += Tb * this.Pbnd[c];
+      }
+    }
+    for (const w of this.wells) if (w.q > 0) {
+      // include placement backlog so the field drives the extra outflow to drain it
+      const boost = 1 + (w.carry || 0) / (w.q * dt);
+      for (let k = 0; k < NZ; k++) rhs[this.idx(w.i, w.j, k)] += w.qk[k] * boost;
+    }
+    const Ax = (x, out) => {
+      for (let c = 0; c < NC; c++) out[c] = diag[c] * x[c];
+      for (let c = 0; c < NC; c++) {
+        if (TE[c]) { out[c] -= TE[c] * x[c + 1]; out[c + 1] -= TE[c] * x[c]; }
+        if (TN[c]) { out[c] -= TN[c] * x[c + N]; out[c + N] -= TN[c] * x[c]; }
+        if (TT[c]) { out[c] -= TT[c] * x[c + NA]; out[c + NA] -= TT[c] * x[c]; }
+      }
+    };
+    const x = Float64Array.from(this.P), r = new Float64Array(NC),
+          z = new Float64Array(NC), d = new Float64Array(NC), q = new Float64Array(NC);
+    Ax(x, r); for (let c = 0; c < NC; c++) r[c] = rhs[c] - r[c];
+    let rz = 0;
+    for (let c = 0; c < NC; c++) { z[c] = r[c] / diag[c]; d[c] = z[c]; rz += r[c] * z[c]; }
+    const tol = Math.max(1e-8 * Math.abs(rz), 1e-20);
+    for (let it = 0; it < 350 && rz > tol; it++) {
+      Ax(d, q); let dq = 0;
+      for (let c = 0; c < NC; c++) dq += d[c] * q[c];
+      const al = rz / (dq + 1e-300);
+      for (let c = 0; c < NC; c++) { x[c] += al * d[c]; r[c] -= al * q[c]; }
+      let rz2 = 0;
+      for (let c = 0; c < NC; c++) { z[c] = r[c] / diag[c]; rz2 += r[c] * z[c]; }
+      const be = rz2 / (rz + 1e-300); rz = rz2;
+      for (let c = 0; c < NC; c++) d[c] = z[c] + be * d[c];
+    }
+    this.P = x; this.TE = TE; this.TN = TN; this.TT = TT;
+  }
+  step(dtDays) {
+    const p = this.p, N = this.N, NZ = this.NZ, NA = this.NA, dt = dtDays * 86400,
+          yr = this.t / 365.25, g = 9.81;
+    for (const w of this.wells) {
+      const active = yr >= (w.startYr || 0) && yr < (w.stopYr ?? p.injYears);
+      if (!active) { w.q = 0; w.qk = new Float64Array(NZ); w.bhp = this.P[this.idx(w.i, w.j, 0)]; continue; }
+      const qMass = w.rate_MtYr * 1e9 / (365.25 * 86400);
+      let q = qMass / this.rhoG;
+      const lamE = p.krgmax / this.muG;
+      // distribute by WI among layers with spare capacity (Sg < cap-0.04)
+      const cap = 1 - p.swi - 0.04;
+      const open = w.WI.map((wi, k) => this.Sg[this.idx(w.i, w.j, k)] < cap ? wi : 0);
+      let wiSum = open.reduce((a, b) => a + b, 0);
+      if (wiSum <= 0) { wiSum = w.WI.reduce((a, b) => a + b, 0); open.forEach((_, k) => open[k] = w.WI[k]); }
+      let bhp = 0;
+      const qk = open.map(wi => q * wi / wiSum);
+      for (let k = 0; k < NZ; k++)
+        bhp = Math.max(bhp, this.P[this.idx(w.i, w.j, k)] + qk[k] / (w.WI[k] * lamE + 1e-30));
+      const bhpMax = (w.bhpMax_kPa || 1e9) * 1e3;
+      if (bhp > bhpMax) {
+        const f = Math.max((bhpMax - this.P[this.idx(w.i, w.j, NZ >> 1)]) /
+                  Math.max(bhp - this.P[this.idx(w.i, w.j, NZ >> 1)], 1e-9), 0);
+        q *= f; for (let k = 0; k < NZ; k++) qk[k] *= f;
+        bhp = bhpMax; this.warnings.push(`Yr ${yr.toFixed(1)}: ${w.name} BHP-limited`);
+      }
+      w.q = q; w.qk = qk; w.bhp = bhp;
+      const dm = q * this.rhoG * dt; w.cum += dm; this.injTot += dm;
+    }
+    this.solveP(dt);
+    const lg = this.lgArr, lw = this.lwArr;
+    // CFL from max throughput
+    let maxV = 0;
+    const faceF = (c, n, T) => T * (this.P[c] - this.P[n]);
+    for (let c = 0; c < this.NC; c++) {
+      if (this.TE[c]) maxV = Math.max(maxV, Math.abs(faceF(c, c + 1, this.TE[c])) / this.Vp[c]);
+      if (this.TN[c]) maxV = Math.max(maxV, Math.abs(faceF(c, c + N, this.TN[c])) / this.Vp[c]);
+      if (this.TT[c]) maxV = Math.max(maxV, Math.abs(faceF(c, c + NA, this.TT[c])) / this.Vp[c]);
+    }
+    let kvMax = 0; for (let c2 = 0; c2 < this.NC; c2++) kvMax = Math.max(kvMax, this.kv[c2]);
+    const vBuoy = kvMax * p.krgmax * (this.rhoB - this.rhoG) * 9.81 / this.muG;   // m/s Darcy
+    const phiMin = 0.02;
+    const nSubB = Math.ceil(vBuoy * dt / (this.dz * phiMin * 0.25));
+    const nSub = Math.min(Math.max(Math.ceil(maxV * dt / 0.2), nSubB, 1), 1500), dts = dt / nSub;
+    const dRho = this.rhoB - this.rhoG;
+    // active set: gas-bearing cells + neighbors + well perfs (perf optimization)
+    const act = [];
+    {
+      const mark = new Uint8Array(this.NC);
+      const add = cc => { if (cc >= 0 && cc < this.NC && !mark[cc]) { mark[cc] = 1; act.push(cc); } };
+      for (let cc = 0; cc < this.NC; cc++) if (this.Sg[cc] > 1e-9) {
+        add(cc);
+        const i = cc % N, j = ((cc / N) | 0) % N, k = (cc / NA) | 0;
+        if (i > 0) add(cc - 1); if (i < N - 1) add(cc + 1);
+        if (j > 0) add(cc - N); if (j < N - 1) add(cc + N);
+        if (k > 0) add(cc - NA); if (k < NZ - 1) add(cc + NA);
+      }
+      for (const w of this.wells) for (let k = 0; k < NZ; k++) add(this.idx(w.i, w.j, k));
+    }
+    const capS = 1 - p.swi;
+    const xfer = (aa, bb, Fv) => {           // move gas volume Fv: aa -> bb, conservative by construction
+      if (Fv > 0)
+        Fv = Math.min(Fv, 0.95 * this.Sg[aa] * this.Vp[aa],
+                      0.95 * Math.max(capS - this.Sg[bb], 0) * this.Vp[bb]);
+      else
+        Fv = -Math.min(-Fv, 0.95 * this.Sg[bb] * this.Vp[bb],
+                       0.95 * Math.max(capS - this.Sg[aa], 0) * this.Vp[aa]);
+      this.Sg[aa] -= Fv / this.Vp[aa]; this.Sg[bb] += Fv / this.Vp[bb];
+    };
+    for (let s = 0; s < nSub; s++) {
+      for (const c of act) {
+        const i = c % N, j = ((c / N) | 0) % N, k = (c / NA) | 0;
+        if (i < N - 1 && this.TE[c]) {
+          const n = c + 1, F = this.TE[c] * (this.P[c] - this.P[n]);
+          const up = F >= 0 ? c : n, fg = lg[up] / (lg[up] + lw[up] + 1e-30);
+          if (fg > 1e-12) xfer(c, n, fg * F * dts);
+        }
+        if (j < N - 1 && this.TN[c]) {
+          const n = c + N, F = this.TN[c] * (this.P[c] - this.P[n]);
+          const up = F >= 0 ? c : n, fg = lg[up] / (lg[up] + lw[up] + 1e-30);
+          if (fg > 1e-12) xfer(c, n, fg * F * dts);
+        }
+        if (k < NZ - 1 && this.TT[c]) {
+          const n = c + NA, T = this.TT[c];
+          const rf = ((lg[c] + lg[n]) * this.rhoG + (lw[c] + lw[n]) * this.rhoB) /
+                     (lg[c] + lg[n] + lw[c] + lw[n] + 1e-30);
+          const F = T * (this.P[c] - this.P[n] - rf * g * this.dz);
+          const up = F >= 0 ? c : n, fg = lg[up] / (lg[up] + lw[up] + 1e-30);
+          if (fg > 1e-12) xfer(c, n, fg * F * dts);
+          // buoyant counter-current: gas up (n -> c)
+          const Tg = T / (0.5 * (lg[c] + lw[c]) + 0.5 * (lg[n] + lw[n]) + 1e-30);
+          const lgw = lg[n] * lw[c] / (lg[n] + lw[c] + 1e-30);
+          if (lgw > 1e-12) xfer(n, c, Tg * lgw * dRho * g * this.dz * dts);
+        }
+      }
+      // well sources: place by WI allocation, spill to any layer with room;
+      // unplaced volume carries to next substep (transient), cut only at step end
+      for (const w of this.wells) if (w.q > 0) {
+        let rem = (w.carry || 0) + w.q * dts;
+        for (let pass = 0; pass < 2 && rem > 1e-12; pass++)
+          for (let k = 0; k < NZ && rem > 1e-12; k++) {
+            const c = this.idx(w.i, w.j, k);
+            const want = pass === 0 ? Math.min(rem, w.qk[k] * dts) : rem;
+            const put = Math.min(want, Math.max(capS - this.Sg[c], 0) * this.Vp[c]);
+            if (put > 0) { this.Sg[c] += put / this.Vp[c]; rem -= put; }
+          }
+        w.carry = rem;
+      }
+      for (const c of act) if (this.Sg[c] > this.SgMax[c]) this.SgMax[c] = this.Sg[c];
+    }
+    // carry persists across steps (placement lag is numerical-transient);
+    // declare a genuine volumetric limit only if backlog exceeds ~90 days of rate
+    for (const w of this.wells) if ((w.carry || 0) > 0) {
+      const limit = w.q > 0 ? w.q * 86400 * 90 : 0;
+      if (w.carry > limit && limit > 0) {
+        const cut = w.carry - limit;
+        this.injTot -= cut * this.rhoG; w.cum -= cut * this.rhoG; w.carry = limit;
+        this.warnings.push(`Yr ${(this.t / 365.25).toFixed(1)}: ${w.name} volumetrically limited`);
+      }
+    }
+    // dissolution
+    const kD = 0.10;
+    for (const c of act) {
+      if (this.Sg[c] <= 0) continue;
+      const cap = Math.max(this.Vp[c] * (1 - this.Sg[c]) * this.rhoB * this.wEq - this.mDiss[c], 0);
+      const dm = Math.min(cap * kD * dtDays / 30, this.Sg[c] * this.Vp[c] * this.rhoG);
+      if (dm > 0) { this.mDiss[c] += dm; this.Sg[c] -= dm / (this.Vp[c] * this.rhoG); }
+    }
+    this.t += dtDays;
+  }
+  metrics() {
+    const p = this.p; let free = 0, trap = 0, diss = 0, pmax = 0, rMax = 0, area = 0;
+    const w0 = this.wells[0],
+          xi = w0 ? (w0.i + 0.5) * this.dx : p.L_m / 2,
+          yi = w0 ? (w0.j + 0.5) * this.dx : p.L_m / 2;
+    const seen = new Uint8Array(this.NA);
+    let topMass = 0, totMass = 0;
+    for (let c = 0; c < this.NC; c++) {
+      const sgm = this.mobSg(c);
+      const mC = this.Sg[c] * this.Vp[c] * this.rhoG;
+      free += sgm * this.Vp[c] * this.rhoG;
+      trap += (this.Sg[c] - sgm) * this.Vp[c] * this.rhoG;
+      diss += this.mDiss[c];
+      totMass += mC;
+      if (((c / this.NA) | 0) < Math.max(this.NZ * 0.3, 1)) topMass += mC;
+      pmax = Math.max(pmax, this.P[c] - this.rhoB * 9.81 * (this.zc[(c / this.NA) | 0] - p.depth));
+      if (this.Sg[c] > 0.01) {
+        const a = c % this.NA;
+        if (!seen[a]) { seen[a] = 1; area += this.dx * this.dx;
+          const x = (a % this.N + 0.5) * this.dx, y = (((a / this.N) | 0) + 0.5) * this.dx;
+          rMax = Math.max(rMax, Math.hypot(x - xi, y - yi)); }
+      }
+    }
+    const kMid = this.NZ >> 1;
+    return {
+      t_yr: this.t / 365.25, inj_Mt: this.injTot / 1e9,
+      free_Mt: free / 1e9, trap_Mt: trap / 1e9, diss_Mt: diss / 1e9,
+      mbe_pct: this.injTot > 0 ? 100 * (free + trap + diss - this.injTot) / this.injTot : 0,
+      pmax_MPa: pmax / 1e6, topFrac: totMass > 0 ? topMass / totMass : 0,
+      plumeR_km: rMax / 1e3, plumeRequiv_km: Math.sqrt(area / Math.PI) / 1e3,
+      wells: this.wells.map(w => ({name: w.name, q_td: w.q * this.rhoG * 86.4,
+        bhp_MPa: w.bhp / 1e6, cum_Mt: w.cum / 1e9})),
+      monitors: this.monitors.map(m => {
+        let sgmax = 0;
+        for (let k = 0; k < this.NZ; k++)
+          sgmax = Math.max(sgmax, this.Sg[this.idx(m.i, m.j, k)]);
+        return {name: m.name,
+          P_MPa: (this.P[this.idx(m.i, m.j, kMid)] -
+                  this.rhoB * 9.81 * (this.zc[kMid] - p.depth)) / 1e6,
+          Sg: sgmax};
+      })
+    };
+  }
+  run(onReport) {
+    const p = this.p, rep = p.reportDays || 30, totDays = p.totalYears * 365.25;
+    this.history.push(this.metrics());
+    while (this.t < totDays - 0.1) {
+      this.step(Math.min(rep, totDays - this.t));
+      const m = this.metrics(); this.history.push(m);
+      if (onReport) onReport(m, this);
+    }
+    return this.history;
+  }
+}
+
+if (typeof module !== "undefined") module.exports = { VESim, Sim3D, CO2Props, BrineProps, theisAOR };
+/* ============== UI GLUE ============== */
+const $ = id => document.getElementById(id);
+let SIM = null, SNAPS = [], CHARTS = {};
+
+/* ---- tabs ---- */
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#nav button").forEach(x => x.classList.remove("on"));
+  document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+  b.classList.add("on"); $("tab-" + b.dataset.t).classList.add("on");
+  if (b.dataset.t === "maps") drawMap();
+  if (b.dataset.t === "xsec") drawXs();
+});
+
+/* ---- wells tables ---- */
+function wellRow(w) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td><input value="${w.name}"></td><td><input type="number" value="${w.x_m}"></td>
+<td><input type="number" value="${w.y_m}"></td><td><input type="number" step="0.1" value="${w.rate_MtYr}"></td>
+<td><input type="number" value="${w.startYr}"></td><td><input type="number" value="${w.stopYr}"></td>
+<td><input type="number" value="${w.bhpMax_kPa}"></td><td><button class="btn red" style="padding:2px 8px">✕</button></td>`;
+  tr.querySelector("button").onclick = () => { tr.remove(); updCap(); };
+  tr.querySelectorAll("input").forEach(i => i.onchange = updCap);
+  $("tblWells").tBodies[0].appendChild(tr); updCap();
+}
+function monRow(m) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td><input value="${m.name}"></td><td><input type="number" value="${m.x_m}"></td>
+<td><input type="number" value="${m.y_m}"></td><td><button class="btn red" style="padding:2px 8px">✕</button></td>`;
+  tr.querySelector("button").onclick = () => tr.remove();
+  $("tblMons").tBodies[0].appendChild(tr);
+}
+function readWells() {
+  return [...$("tblWells").tBodies[0].rows].map(r => {
+    const v = [...r.cells].map(c => c.firstChild.value);
+    return {name: v[0], x_m: +v[1], y_m: +v[2], rate_MtYr: +v[3],
+            startYr: +v[4], stopYr: +v[5], bhpMax_kPa: +v[6]};
+  });
+}
+function readMons() {
+  return [...$("tblMons").tBodies[0].rows].map(r => {
+    const v = [...r.cells].map(c => c.firstChild.value);
+    return {name: v[0], x_m: +v[1], y_m: +v[2]};
+  });
+}
+function updCap() {
+  const tot = readWells().reduce((a, w) => a + w.rate_MtYr, 0);
+  $("capTot").textContent = tot.toFixed(2) + " Mt/yr (" + (tot * 10).toFixed(0) + " Mt over 10 yr)";
+}
+$("btnAddWell").onclick = () => wellRow({name: "INJ-" + ($("tblWells").tBodies[0].rows.length + 1),
+  x_m: 5000, y_m: 5000, rate_MtYr: 1, startYr: 0, stopYr: 10, bhpMax_kPa: 22500});
+const NISKU_LAYERS = [
+  {phi: 0.045, k_mD: 80}, {phi: 0.040, k_mD: 60}, {phi: 0.1081, k_mD: 800},
+  {phi: 0.1243, k_mD: 2500}, {phi: 0.1351, k_mD: 6000}, {phi: 0.1211, k_mD: 3000},
+  {phi: 0.0994, k_mD: 600}, {phi: 0.038, k_mD: 40}, {phi: 0.028, k_mD: 20}, {phi: 0.022, k_mD: 12}];
+function setLayers(ls) {
+  $("tblLayers").tBodies[0].innerHTML = ls.map((l, k) =>
+    `<tr><td>K${k + 1}</td><td><input type="number" step="0.001" value="${l.phi}"></td>
+<td><input type="number" value="${l.k_mD}"></td></tr>`).join("");
+}
+function readLayers() {
+  return [...$("tblLayers").tBodies[0].rows].map(r => ({
+    phi: +r.cells[1].firstChild.value, k_mD: +r.cells[2].firstChild.value}));
+}
+$("btnNiskuLayers").onclick = () => { $("NZ").value = 10; setLayers(NISKU_LAYERS); };
+$("NZ").onchange = () => {
+  const nz = Math.max(1, +$("NZ").value), cur = readLayers();
+  setLayers(Array.from({length: nz}, (_, k) => cur[k] || {phi: +$("phi").value, k_mD: +$("k_mD").value}));
+};
+$("btnAddMon").onclick = () => monRow({name: "OBS-" + ($("tblMons").tBodies[0].rows.length + 1), x_m: 6000, y_m: 5000});
+
+/* ---- model read/write ---- */
+function readModel() {
+  return {L_m: +$("L_m").value, NX: +$("NX").value, H: +$("H").value, depth: +$("depth").value,
+    phi: +$("phi").value, k_mD: +$("k_mD").value, kvkh: +$("kvkh").value || 0.155, ntg: +$("ntg").value,
+    cr_perkPa: +$("cr").value, P0_kPa: +$("P0").value, T_C: +$("T_C").value,
+    tds_ppm: +$("tds").value, swi: +$("swi").value, sgrmax: +$("sgr").value,
+    krgmax: +$("krg").value, fracGrad_kPam: +$("fg").value,
+    openBoundary: $("bnd").value === "1", hetero_pct: +$("het").value, seed: +$("seed").value,
+    rhoCO2_override: +$("rhoOv").value, wells: readWells(), monitors: readMons(),
+    injYears: +$("injY").value, totalYears: +$("totY").value, reportDays: +$("repD").value,
+    engine: $("eng").value, NZ: Math.max(1, +$("NZ").value), layers: readLayers(),
+    nw: 4.0, ng: 2.0};
+}
+function applyModel(p) {
+  const map = {L_m:"L_m",NX:"NX",H:"H",depth:"depth",phi:"phi",k_mD:"k_mD",ntg:"ntg",
+    cr_perkPa:"cr",P0_kPa:"P0",T_C:"T_C",tds_ppm:"tds",swi:"swi",sgrmax:"sgr",krgmax:"krg",
+    fracGrad_kPam:"fg",hetero_pct:"het",seed:"seed",rhoCO2_override:"rhoOv",
+    injYears:"injY",totalYears:"totY",reportDays:"repD"};
+  for (const [k, id] of Object.entries(map)) if (p[k] !== undefined) $(id).value = p[k];
+  $("bnd").value = p.openBoundary ? "1" : "0";
+  if (p.engine) $("eng").value = p.engine;
+  if (p.kvkh) $("kvkh").value = p.kvkh;
+  if (p.NZ) $("NZ").value = p.NZ;
+  setLayers(p.layers && p.layers.length ? p.layers
+    : Array.from({length: +$("NZ").value || 10}, () => ({phi: p.phi || 0.0761, k_mD: p.k_mD || 1311})));
+  $("tblWells").tBodies[0].innerHTML = ""; $("tblMons").tBodies[0].innerHTML = "";
+  (p.wells || []).forEach(wellRow); (p.monitors || []).forEach(monRow);
+  fluidInfo();
+}
+const NISKU = {L_m: 10000, NX: 50, H: 50, depth: 1250, phi: 0.0761, k_mD: 1311, ntg: 0.70, kvkh: 0.155,
+  engine: "ve", NZ: 10, layers: NISKU_LAYERS, cr_perkPa: 5e-7, P0_kPa: 12263, T_C: 55, tds_ppm: 150000, swi: 0.22, sgrmax: 0.12,
+  krgmax: 0.80, fracGrad_kPam: 20, openBoundary: true, hetero_pct: 0, seed: 42,
+  rhoCO2_override: 640, injYears: 10, totalYears: 15, reportDays: 30,
+  wells: [{name: "CO2-INJ-1", x_m: 5000, y_m: 5000, rate_MtYr: 1.0, startYr: 0, stopYr: 10, bhpMax_kPa: 22500}],
+  monitors: [{name: "OBS-MW-1", x_m: 6344, y_m: 5000}, {name: "OBS-MW-2", x_m: 5000, y_m: 6963}]};
+$("btnPreset").onclick = () => { applyModel(NISKU); log("Nisku V8 preset loaded (Wabamun, Enbridge NET)."); };
+$("btnSaveModel").onclick = () => dl("model_co2sim.json", JSON.stringify(readModel(), null, 1));
+$("dlModel").onclick = $("btnSaveModel").onclick;
+$("fileModel").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => { applyModel(JSON.parse(t)); log("Model loaded: " + f.name); });
+};
+function fluidInfo() {
+  const p = readModel();
+  const rho = p.rhoCO2_override > 0 ? p.rhoCO2_override : CO2Props.rho(p.P0_kPa, p.T_C);
+  $("fluidInfo").innerHTML =
+    `ρCO2 = <b>${rho.toFixed(0)}</b> kg/m³ ${p.rhoCO2_override>0?"(override)":"(Span-Wagner interp.)"} · μCO2 = ${(CO2Props.visc(rho)*1e3).toFixed(3)} mPa·s · ` +
+    `ρbrine = ${BrineProps.rho(p.T_C,p.tds_ppm).toFixed(0)} kg/m³ · μbrine = ${(BrineProps.visc(p.T_C,p.tds_ppm)*1e3).toFixed(2)} mPa·s · ` +
+    `wCO2,eq = ${(BrineProps.wCO2eq(p.P0_kPa,p.T_C,p.tds_ppm)*100).toFixed(1)} wt%`;
+}
+["P0","T_C","tds","rhoOv"].forEach(id => $(id).onchange = fluidInfo);
+
+/* ---- run ---- */
+function log(s) { $("log").textContent += "\n" + s; $("log").scrollTop = 1e9; }
+async function runSim() {
+  const p = readModel();
+  if (!p.wells.length) { alert("Add at least one injection well."); return; }
+  const is3D = p.engine === "3d";
+  if (is3D && p.NX > 45 && !confirm("3D at NX>45 may take minutes in the browser. Continue?")) return;
+  SIM = is3D ? new Sim3D(p) : new VESim(p); SNAPS = [];
+  SIM.is3D = is3D;
+  $("runStat").textContent = "running…"; $("prog").value = 0;
+  log(`\n=== RUN ${new Date().toLocaleTimeString()} — ${p.NX}×${p.NX} grid, ${p.wells.length} injector(s), ` +
+      `${p.wells.reduce((a,w)=>a+w.rate_MtYr,0).toFixed(1)} Mt/yr, ${p.totalYears} yr ===`);
+  const totDays = p.totalYears * 365.25; let nextSnap = 0;
+  await new Promise(res => {
+    const tick = () => {
+      const tEnd = Math.min(SIM.t + 365.25, totDays);
+      while (SIM.t < tEnd - 0.1) {
+        SIM.step(Math.min(p.reportDays, totDays - SIM.t));
+        SIM.history.push(SIM.metrics());
+        if (SIM.t / 365.25 >= nextSnap - 1e-6) {
+          SNAPS.push({yr: Math.round(SIM.t / 365.25 * 10) / 10,
+            Sg: Float32Array.from(SIM.Sg), P: Float32Array.from(SIM.P),
+            mD: Float32Array.from(SIM.mDiss), nz: SIM.is3D ? SIM.NZ : 1});
+          nextSnap += 1;
+        }
+      }
+      $("prog").value = 100 * SIM.t / totDays;
+      const m = SIM.history[SIM.history.length - 1];
+      $("runStat").textContent = `Yr ${m.t_yr.toFixed(1)} | plume ${m.plumeR_km.toFixed(2)} km | MBE ${m.mbe_pct.toFixed(2)}%`;
+      if (SIM.t < totDays - 0.1) setTimeout(tick, 0); else res();
+    };
+    SIM.history.push(SIM.metrics()); tick();
+  });
+  const m = SIM.history[SIM.history.length - 1];
+  log(`Done. Injected ${m.inj_Mt.toFixed(2)} Mt | MBE ${m.mbe_pct.toFixed(3)}% | max P ${m.pmax_MPa.toFixed(2)} MPa | plume ${m.plumeR_km.toFixed(2)} km`);
+  if (SIM.warnings.length) log("⚠ " + [...new Set(SIM.warnings)].slice(0, 8).join("\n⚠ "));
+  $("runStat").textContent = "complete";
+  kpis(); buildCharts(); setupSliders(); regulatory(); drawMap(); drawXs();
+}
+$("btnRun").onclick = runSim; $("btnRunTop").onclick = runSim;
+function kpis() {
+  const m = SIM.history[SIM.history.length - 1];
+  const bhpMax = Math.max(...SIM.history.map(h => Math.max(...h.wells.map(w => w.bhp_MPa))));
+  const fracP = SIM.fracP / 1e6, lim = 0.9 * fracP;
+  $("runKpis").innerHTML = [
+    ["Injected", m.inj_Mt.toFixed(1) + " Mt", ""],
+    ["Max BHP", bhpMax.toFixed(2) + " MPa", bhpMax < lim ? "good" : "bad"],
+    ["vs 90% frac", lim.toFixed(1) + " MPa", ""],
+    ["Plume radius", m.plumeR_km.toFixed(2) + " km", ""],
+    ["Trapped+dissolved", (100 * (m.trap_Mt + m.diss_Mt) / Math.max(m.inj_Mt, 1e-9)).toFixed(0) + "%", "good"],
+    ["Mass balance err", m.mbe_pct.toFixed(3) + "%", Math.abs(m.mbe_pct) < 1 ? "good" : "bad"]
+  ].map(([t, v, c]) => `<div class="kpi ${c}"><div class="v">${v}</div><div class="t">${t}</div></div>`).join("");
+}
+
+/* ---- colormaps & map view ---- */
+function turbo(v) {
+  v = Math.min(Math.max(v, 0), 1);
+  const cl = x => Math.min(Math.max(Math.round(x), 0), 255);
+  const r = cl(34.61 + v * (1172.33 + v * (-10793.56 + v * (33300.12 + v * (-38394.49 + v * 14825.05)))));
+  const g = cl(23.31 + v * (557.33 + v * (1225.33 + v * (-3574.96 + v * (1073.77 + v * 707.56)))));
+  const b = cl(27.2 + v * (3211.1 + v * (-15327.97 + v * (27814.0 + v * (-22569.18 + v * 6838.66)))));
+  return `rgb(${r},${g},${b})`;
+}
+function setupSliders() {
+  ["mapT", "xsT"].forEach(id => { $(id).max = SNAPS.length - 1; $(id).value = SNAPS.length - 1; });
+  $("xsWell").innerHTML = readModel().wells.map((w, i) => `<option value="${i}">${w.name}</option>`).join("");
+  const nz = SIM.is3D ? SIM.NZ : 1;
+  $("mapK").innerHTML = '<option value="-1">Max over K</option>' +
+    Array.from({length: nz}, (_, k) => `<option value="${k}">K${k + 1}${nz > 1 ? (k === 0 ? " (top)" : k === nz - 1 ? " (base)" : "") : ""}</option>`).join("");
+}
+$("mapK").onchange = () => drawMap();
+$("mapT").oninput = drawMap; $("mapProp").onchange = drawMap;
+$("xsT").oninput = drawXs; $("xsWell").onchange = drawXs; $("xsDir").onchange = drawXs;
+function drawMap() {
+  if (!SIM || !SNAPS.length) return;
+  const sn = SNAPS[+$("mapT").value], p = SIM.p, N = SIM.N,
+        cv = $("cvMap"), g = cv.getContext("2d"), prop = $("mapProp").value;
+  $("mapTlab").textContent = "Year " + sn.yr;
+  const W = cv.width, Hpx = 700, cs = Math.floor(Math.min(W - 90, Hpx) / N);
+  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+  let get, vmax, label;
+  const NA = N * N, nz = sn.nz || 1, kSel = +($("mapK").value);
+  const pick = (arr, c, agg) => {
+    if (nz === 1) return arr[c];
+    if (kSel >= 0) return arr[kSel * NA + c];
+    let v = 0; for (let k = 0; k < nz; k++) v = agg(v, arr[k * NA + c]); return v;
+  };
+  const kLab = nz > 1 ? (kSel >= 0 ? ` K${kSel + 1}` : " (max K)") : "";
+  if (prop === "sg") { get = c => pick(sn.Sg, c, Math.max); vmax = 0.8; label = "SG" + kLab; }
+  else if (prop === "dp") {
+    get = c => {
+      if (nz === 1) return (sn.P[c] - p.P0_kPa * 1e3) / 1e3;
+      const k = kSel >= 0 ? kSel : 0;
+      return (sn.P[k * NA + c] - (p.P0_kPa * 1e3 + SIM.rhoB * 9.81 * ((k + 0.5) * SIM.dz))) / 1e3;
+    }; vmax = 400; label = "ΔP (kPa)" + kLab;
+  }
+  else { get = c => { let v = 0;
+      if (nz === 1) v = sn.mD[c]; else if (kSel >= 0) v = sn.mD[kSel * NA + c];
+      else for (let k = 0; k < nz; k++) v += sn.mD[k * NA + c];
+      return v / (SIM.dx * SIM.dx); }; vmax = 30; label = "Dissolved (kg/m²)" + kLab; }
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const v = get(j * N + i) / vmax;
+    g.fillStyle = v <= 0.001 ? "#eef2f5" : turbo(v);
+    g.fillRect(20 + i * cs, 20 + (N - 1 - j) * cs, cs, cs);
+  }
+  // plume contour SG=0.01 cells outline (light) + wells
+  g.strokeStyle = "#0b3954"; g.lineWidth = 1;
+  g.strokeRect(20, 20, N * cs, N * cs);
+  const toPx = (x, y) => [20 + x / p.L_m * N * cs, 20 + (1 - y / p.L_m) * N * cs];
+  for (const w of p.wells) {
+    const [x, y] = toPx(w.x_m, w.y_m);
+    g.fillStyle = "red"; g.beginPath(); g.moveTo(x, y - 7); g.lineTo(x - 6, y + 5); g.lineTo(x + 6, y + 5); g.fill();
+    g.fillStyle = "#000"; g.font = "11px Arial"; g.fillText(w.name, x + 8, y);
+  }
+  for (const mn of p.monitors) {
+    const [x, y] = toPx(mn.x_m, mn.y_m);
+    g.fillStyle = "green"; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill();
+    g.fillStyle = "#000"; g.fillText(mn.name, x + 8, y);
+  }
+  // scale bar + colorbar
+  const km = 2000 / p.L_m * N * cs;
+  g.fillStyle = "#000"; g.fillRect(25, 30 + N * cs, km, 4);
+  g.font = "11px Arial"; g.fillText("2 km", 25 + km + 6, 37 + N * cs);
+  for (let i = 0; i < 200; i++) {
+    g.fillStyle = turbo(i / 200);
+    g.fillRect(40 + N * cs, 20 + (200 - i) * (N * cs) / 220, 16, (N * cs) / 200 + 1);
+  }
+  g.fillStyle = "#000";
+  g.fillText(vmax + "", 60 + N * cs, 30); g.fillText("0", 60 + N * cs, 22 + N * cs);
+  g.save(); g.translate(78 + N * cs, 20 + N * cs / 2); g.rotate(-Math.PI / 2);
+  g.textAlign = "center"; g.fillText(label + " — Year " + sn.yr, 0, 0); g.restore();
+}
+function drawXs() {
+  if (!SIM || !SNAPS.length) return;
+  const sn = SNAPS[+$("xsT").value], p = SIM.p, N = SIM.N,
+        cv = $("cvXs"), g = cv.getContext("2d");
+  $("xsTlab").textContent = "Year " + sn.yr;
+  const w = p.wells[+$("xsWell").value || 0]; if (!w) return;
+  const dir = $("xsDir").value;
+  let wi, wj;
+  if (SIM.is3D) { const ww = SIM.wells[+$("xsWell").value || 0]; wi = ww.i; wj = ww.j; }
+  else { const wc = SIM.cellAt(w.x_m, w.y_m); wi = wc % N; wj = (wc / N) | 0; }
+  if (SIM.is3D) {                              // true 3D slice rendering
+    const NA = N * N, nz = sn.nz || SIM.NZ;
+    const W = cv.width - 80, Hc = 260, x0 = 50, y0 = 40, cw = W / N, ch = Hc / nz;
+    g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+    for (let k = 0; k < nz; k++) for (let s = 0; s < N; s++) {
+      const c = dir === "x" ? k * NA + wj * N + s : k * NA + s * N + wi;
+      const sg = sn.Sg[c];
+      g.fillStyle = sg <= 0.005 ? "#dce8f0" : turbo(sg / 0.8);
+      g.fillRect(x0 + s * cw, y0 + k * ch, cw + 0.5, ch + 0.5);
+    }
+    g.strokeStyle = "#0b3954"; g.strokeRect(x0, y0, W, Hc);
+    g.fillStyle = "#9c7c2c"; g.fillRect(x0, y0 - 6, W, 6);
+    g.fillStyle = "#555"; g.font = "11px Arial";
+    g.fillText(`${p.depth} m (top)`, 4, y0 + 8); g.fillText(`${p.depth + p.H} m`, 4, y0 + Hc);
+    g.fillText("Caprock", x0 + 6, y0 - 10);
+    const wpos = dir === "x" ? wi : wj;
+    g.strokeStyle = "red"; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(x0 + (wpos + 0.5) * cw, y0 - 18); g.lineTo(x0 + (wpos + 0.5) * cw, y0 + Hc); g.stroke();
+    g.fillStyle = "red"; g.fillText(w.name, x0 + (wpos + 0.5) * cw + 4, y0 - 20);
+    g.fillStyle = "#000";
+    g.fillText(`${dir === "x" ? "W–E" : "S–N"} section through ${w.name} — Year ${sn.yr} — 3D Sg (per-layer)`, x0, cv.height - 12);
+    return;
+  }
+  const cells = [];
+  for (let s = 0; s < N; s++) cells.push(dir === "x" ? wj * N + s : s * N + wi);
+  const W = cv.width - 80, Hc = 260, x0 = 50, y0 = 40;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+  g.fillStyle = "#dce8f0"; g.fillRect(x0, y0, W, Hc);                 // brine
+  const cw = W / N;
+  for (let s = 0; s < N; s++) {
+    const sg = sn.Sg[cells[s]], h = sg / (1 - p.swi) * Hc;            // VE column from top
+    if (h > 0.4) {
+      const grad = g.createLinearGradient(0, y0, 0, y0 + h);
+      grad.addColorStop(0, turbo(0.85)); grad.addColorStop(1, turbo(0.35));
+      g.fillStyle = grad; g.fillRect(x0 + s * cw, y0, cw + 0.5, h);
+    }
+  }
+  g.strokeStyle = "#0b3954"; g.strokeRect(x0, y0, W, Hc);
+  g.fillStyle = "#555"; g.font = "11px Arial";
+  g.fillText(`${p.depth} m (top)`, 4, y0 + 8); g.fillText(`${p.depth + p.H} m`, 4, y0 + Hc);
+  g.fillText("Caprock (Calmar)", x0 + 6, y0 - 8);
+  g.fillStyle = "#9c7c2c"; g.fillRect(x0, y0 - 6, W, 6);
+  // well marker
+  const wpos = dir === "x" ? wi : wj;
+  g.strokeStyle = "red"; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(x0 + (wpos + 0.5) * cw, y0 - 18); g.lineTo(x0 + (wpos + 0.5) * cw, y0 + Hc); g.stroke();
+  g.fillStyle = "red"; g.fillText(w.name, x0 + (wpos + 0.5) * cw + 4, y0 - 20);
+  g.fillStyle = "#000";
+  g.fillText(`${dir === "x" ? "W–E" : "S–N"} section through ${w.name} — Year ${sn.yr} — CO2 column (VE reconstruction)`, x0, cv.height - 12);
+  g.fillText("0", x0 - 8, y0 + Hc + 14);
+  g.fillText((p.L_m / 1000).toFixed(0) + " km", x0 + W - 14, y0 + Hc + 14);
+}
+
+/* ---- charts ---- */
+function buildCharts() {
+  const H = SIM.history, t = H.map(h => h.t_yr);
+  const mk = (id, cfg) => { if (CHARTS[id]) CHARTS[id].destroy();
+    CHARTS[id] = new Chart($(id), cfg); };
+  const base = {type: "line", options: {responsive: true, maintainAspectRatio: false,
+    animation: false, interaction: {mode: "index", intersect: false},
+    scales: {x: {type: "linear", title: {display: true, text: "Years"}}},
+    elements: {point: {radius: 0}}}};
+  mk("chMass", {...base, data: {labels: t, datasets: [
+    {label: "Injected", data: H.map((h,i)=>({x:t[i],y:h.inj_Mt})), borderColor: "#000", borderDash: [5,4]},
+    {label: "Free (mobile)", data: H.map((h,i)=>({x:t[i],y:h.free_Mt})), borderColor: "#d62728", fill: "origin", backgroundColor: "#d6272822"},
+    {label: "Residual trapped", data: H.map((h,i)=>({x:t[i],y:h.trap_Mt})), borderColor: "#ff9f40", fill: "origin", backgroundColor: "#ff9f4022"},
+    {label: "Dissolved", data: H.map((h,i)=>({x:t[i],y:h.diss_Mt})), borderColor: "#1f77b4", fill: "origin", backgroundColor: "#1f77b422"}]},
+    options: {...base.options, plugins: {title: {display: true, text: "CO2 mass & trapping (Mt)"}}}});
+  const dsB = [];
+  SIM.p.wells.forEach((w, i) => dsB.push({label: w.name + " BHP",
+    data: H.map((h, j) => ({x: t[j], y: h.wells[i] ? h.wells[i].bhp_MPa : null})), borderColor: ["#d62728","#9467bd","#8c564b","#e377c2"][i % 4]}));
+  dsB.push({label: "90% frac P", data: t.map(x => ({x, y: 0.9 * SIM.fracP / 1e6})), borderColor: "#000", borderDash: [6,4]});
+  mk("chBhp", {...base, data: {datasets: dsB},
+    options: {...base.options, plugins: {title: {display: true, text: "Injector BHP vs limit (MPa)"}}}});
+  mk("chRad", {...base, data: {datasets: [
+    {label: "Plume Rmax (SG>0.01)", data: H.map((h,i)=>({x:t[i],y:h.plumeR_km})), borderColor: "#d62728"},
+    {label: "Plume R area-equiv", data: H.map((h,i)=>({x:t[i],y:h.plumeRequiv_km})), borderColor: "#1f77b4"},
+    {label: "Theis ΔP>10 kPa AOR", data: t.filter(x=>x>0.05).map(x => ({x,
+      y: theisAOR(SIM.p, Math.min(x, SIM.p.injYears), 10, SIM.p.wells.reduce((a,w)=>a+w.rate_MtYr,0)) / 1e3})),
+      borderColor: "#2ca02c", borderDash: [4,3]}]},
+    options: {...base.options, scales: {...base.options.scales,
+      y: {type: "logarithmic", title: {display: true, text: "km"}}},
+      plugins: {title: {display: true, text: "Plume & pressure AOR radii (km, log)"}}}});
+  const dsM = [];
+  SIM.p.monitors.forEach((mn, i) => {
+    dsM.push({label: mn.name + " P", data: H.map((h, j) => ({x: t[j], y: h.monitors[i].P_MPa})),
+      borderColor: ["#2ca02c","#1f77b4","#9467bd"][i % 3], yAxisID: "y"});
+    dsM.push({label: mn.name + " SG", data: H.map((h, j) => ({x: t[j], y: h.monitors[i].Sg})),
+      borderColor: ["#2ca02c","#1f77b4","#9467bd"][i % 3], borderDash: [3,3], yAxisID: "y2"});
+  });
+  mk("chMon", {...base, data: {datasets: dsM},
+    options: {...base.options, scales: {...base.options.scales,
+      y: {title: {display: true, text: "P (MPa)"}},
+      y2: {position: "right", title: {display: true, text: "SG"}, min: 0, max: 0.8}},
+      plugins: {title: {display: true, text: "Monitoring well response"}}}});
+}
+
+/* ---- sensitivity ---- */
+const SENS = [["phi", "Porosity", 0.8, 1.2], ["k_mD", "Permeability", 0.5, 2.0],
+  ["rate", "Injection rate", 0.75, 1.25], ["sgrmax", "Residual Sgr", 0.5, 1.5],
+  ["H", "Thickness", 0.8, 1.2], ["tds_ppm", "Salinity", 0.67, 1.33]];
+$("sensChecks").innerHTML = SENS.map(([k, n]) =>
+  `<label style="width:auto;display:inline"><input type="checkbox" checked data-k="${k}" style="width:auto"> ${n}</label>`).join("");
+$("btnSens").onclick = async () => {
+  const sel = [...document.querySelectorAll("#sensChecks input:checked")].map(i => i.dataset.k);
+  const base = readModel(); base.NX = 40; base.reportDays = 45;
+  const runCase = p => { const s = new VESim(p); s.run();
+    const endInj = s.history.reduce((a, b) => Math.abs(b.t_yr - p.injYears) < Math.abs(a.t_yr - p.injYears) ? b : a);
+    return {R: endInj.plumeR_km, B: Math.max(...s.history.map(h => Math.max(...h.wells.map(w => w.bhp_MPa))))}; };
+  const b0 = runCase(base), rows = [];
+  let done = 0; $("sProg").value = 0;
+  for (const key of sel) {
+    const [, name, lo, hi] = SENS.find(s => s[0] === key);
+    const vary = f => { const p = JSON.parse(JSON.stringify(base));
+      if (key === "rate") p.wells.forEach(w => w.rate_MtYr *= f); else p[key] *= f; return runCase(p); };
+    await new Promise(r => setTimeout(r, 10));
+    const lo_ = vary(lo), hi_ = vary(hi);
+    rows.push({name, lo: lo_, hi: hi_});
+    $("sProg").value = 100 * (++done) / sel.length;
+  }
+  rows.sort((a, b) => Math.abs(b.hi.R - b.lo.R) - Math.abs(a.hi.R - a.lo.R));
+  drawTornado(rows, b0);
+  $("sensTbl").innerHTML = "<table><tr><th>Parameter</th><th>Plume R low (km)</th><th>base</th><th>high</th><th>BHP low (MPa)</th><th>high</th></tr>" +
+    rows.map(r => `<tr><td>${r.name}</td><td>${r.lo.R.toFixed(2)}</td><td>${b0.R.toFixed(2)}</td><td>${r.hi.R.toFixed(2)}</td><td>${r.lo.B.toFixed(2)}</td><td>${r.hi.B.toFixed(2)}</td></tr>`).join("") + "</table>";
+};
+function drawTornado(rows, b0) {
+  const cv = $("cvTor"), g = cv.getContext("2d");
+  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+  const allR = rows.flatMap(r => [r.lo.R, r.hi.R, b0.R]),
+        mn = Math.min(...allR) * 0.95, mx = Math.max(...allR) * 1.05;
+  const X = v => 170 + (v - mn) / (mx - mn) * (cv.width - 220);
+  g.font = "12px Arial";
+  rows.forEach((r, i) => {
+    const y = 50 + i * 50;
+    g.fillStyle = "#1f77b4"; g.fillRect(Math.min(X(r.lo.R), X(b0.R)), y, Math.abs(X(r.lo.R) - X(b0.R)), 24);
+    g.fillStyle = "#d62728"; g.fillRect(Math.min(X(r.hi.R), X(b0.R)), y, Math.abs(X(r.hi.R) - X(b0.R)), 24);
+    g.fillStyle = "#000"; g.fillText(r.name, 12, y + 16);
+    g.fillText(r.lo.R.toFixed(2), X(r.lo.R) - 34, y + 16); g.fillText(r.hi.R.toFixed(2), X(r.hi.R) + 4, y + 16);
+  });
+  g.strokeStyle = "#000"; g.beginPath(); g.moveTo(X(b0.R), 36); g.lineTo(X(b0.R), 46 + rows.length * 50); g.stroke();
+  g.fillStyle = "#000"; g.font = "bold 13px Arial";
+  g.fillText(`Tornado — plume radius at end of injection (base ${b0.R.toFixed(2)} km) | blue: low case, red: high case`, 12, 20);
+}
+
+/* ---- regulatory ---- */
+function regulatory() {
+  const p = SIM.p, H = SIM.history, m = H[H.length - 1];
+  const endInj = H.reduce((a, b) => Math.abs(b.t_yr - p.injYears) < Math.abs(a.t_yr - p.injYears) ? b : a);
+  const bhpMax = Math.max(...H.map(h => Math.max(...h.wells.map(w => w.bhp_MPa))));
+  const fracP = SIM.fracP / 1e6, lim = 0.9 * fracP;
+  const postGrowth = m.plumeR_km - endInj.plumeR_km;
+  const totRate = p.wells.reduce((a, w) => a + w.rate_MtYr, 0);
+  const aor10 = theisAOR(p, p.injYears, 10, totRate) / 1e3;
+  const aorEPA = theisAOR(p, p.injYears, 0.5 * (BrineProps.rho(p.T_C,p.tds_ppm)-1000) * 9.81 * 0 + 100, totRate) / 1e3; // 100 kPa illustrative critical-ΔP
+  const pill = ok => `<span class="pill ${ok ? "pass" : "fail"}">${ok ? "PASS" : "REVIEW"}</span>`;
+  const yrRows = [1, 3, 5, 7, 10, 12, 15].filter(y => y <= p.totalYears).map(y => {
+    const h = H.reduce((a, b) => Math.abs(b.t_yr - y) < Math.abs(a.t_yr - y) ? b : a);
+    return `<tr><td>${y}</td><td>${h.inj_Mt.toFixed(1)}</td><td>${h.plumeR_km.toFixed(2)}</td><td>${h.plumeRequiv_km.toFixed(2)}</td>
+<td>${(theisAOR(p, Math.min(y, p.injYears), 10, totRate) / 1e3).toFixed(0)}</td>
+<td>${h.free_Mt.toFixed(2)}/${h.trap_Mt.toFixed(2)}/${h.diss_Mt.toFixed(2)}</td><td>${h.mbe_pct.toFixed(2)}%</td></tr>`;
+  }).join("");
+  $("regOut").innerHTML = `
+<div class="note"><b>Use &amp; limitations:</b> VE screening-class results suitable to <i>support</i> AER Directive 065 scheme applications and EPA Class VI AoR &amp; Corrective Action plans (40 CFR 146.84 allows computational modeling of appropriate complexity for AoR delineation). The bounding containment demonstration should reference the full compositional model (CMG-GEM V8 decks). Mass-balance closure this run: <b>${m.mbe_pct.toFixed(3)}%</b>.</div>
+<div class="card"><h3>Containment assurance (AER D065 / EPA 146.88)</h3><table>
+<tr><th>Check</th><th>Value</th><th>Limit</th><th>Status</th></tr>
+<tr><td>Max BHP</td><td>${bhpMax.toFixed(2)} MPa</td><td>${lim.toFixed(1)} MPa (90% frac @ ${p.fracGrad_kPam} kPa/m)</td><td>${pill(bhpMax < lim)}</td></tr>
+<tr><td>Max reservoir P</td><td>${Math.max(...H.map(h=>h.pmax_MPa)).toFixed(2)} MPa</td><td>${fracP.toFixed(1)} MPa (frac)</td><td>${pill(Math.max(...H.map(h=>h.pmax_MPa)) < fracP)}</td></tr>
+<tr><td>Post-injection plume growth</td><td>${postGrowth.toFixed(2)} km over ${(p.totalYears - p.injYears)} yr</td><td>stabilizing trend</td><td>${pill(postGrowth < 0.5)}</td></tr>
+<tr><td>Plume inside model domain</td><td>${m.plumeR_km.toFixed(2)} km</td><td>&lt; ${(p.L_m / 2e3 * 0.9).toFixed(1)} km</td><td>${pill(m.plumeR_km < p.L_m / 2e3 * 0.9)}</td></tr>
+<tr><td>Mass balance closure</td><td>${m.mbe_pct.toFixed(3)}%</td><td>&lt; 1%</td><td>${pill(Math.abs(m.mbe_pct) < 1)}</td></tr></table></div>
+<div class="card"><h3>AOR / AoR delineation</h3><table>
+<tr><th>Year</th><th>CO2 (Mt)</th><th>Plume Rmax (km)</th><th>R equiv (km)</th><th>Theis ΔP&gt;10 kPa (km)</th><th>F/R/D (Mt)</th><th>MBE</th></tr>${yrRows}</table>
+<p style="font-size:11px;color:#666">Pressure AoR from Theis analytics (open aquifer). EPA Class VI: replace the 10 kPa screening threshold with the site-specific critical pressure rise per §146.84(c) (USDW displacement head). AER: AOR per D065 application requirements.</p></div>
+<div class="card"><h3>MMV / Testing &amp; Monitoring indicators</h3><table>
+<tr><th>KPI</th><th>Predicted</th></tr>
+${p.monitors.map((mn, i) => {
+  const bt = H.find(h => h.monitors[i].Sg > 0.01);
+  return `<tr><td>CO2 arrival at ${mn.name}</td><td>${bt ? "Year " + bt.t_yr.toFixed(1) : "not within " + p.totalYears + " yr"}</td></tr>`;
+}).join("")}
+<tr><td>Trapped + dissolved at end</td><td>${(m.trap_Mt + m.diss_Mt).toFixed(2)} Mt (${(100 * (m.trap_Mt + m.diss_Mt) / Math.max(m.inj_Mt, 1e-9)).toFixed(0)}%)</td></tr>
+<tr><td>Pressure recovery after shut-in</td><td>${(Math.max(...H.map(h=>h.pmax_MPa)) - m.pmax_MPa).toFixed(2)} MPa dissipated</td></tr></table></div>`;
+}
+
+/* ---- exports ---- */
+function dl(name, text, mime = "text/plain") {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type: mime})); a.download = name; a.click();
+}
+function csv(rows) { return rows.map(r => r.join(",")).join("\n"); }
+$("dlHist").onclick = () => { if (!SIM) return alert("Run first.");
+  const rows = [["t_yr","inj_Mt","free_Mt","trap_Mt","diss_Mt","mbe_pct","pmax_MPa","plumeRmax_km","plumeRequiv_km",
+    ...SIM.p.wells.map(w => w.name + "_bhp_MPa"), ...SIM.p.monitors.map(m => m.name + "_P_MPa"), ...SIM.p.monitors.map(m => m.name + "_Sg")]];
+  for (const h of SIM.history) rows.push([h.t_yr.toFixed(3), h.inj_Mt.toFixed(4), h.free_Mt.toFixed(4),
+    h.trap_Mt.toFixed(4), h.diss_Mt.toFixed(4), h.mbe_pct.toFixed(4), h.pmax_MPa.toFixed(4),
+    h.plumeR_km.toFixed(4), h.plumeRequiv_km.toFixed(4),
+    ...h.wells.map(w => w.bhp_MPa.toFixed(4)), ...h.monitors.map(m => m.P_MPa.toFixed(4)), ...h.monitors.map(m => m.Sg.toFixed(5))]);
+  dl("co2sim_timeseries.csv", csv(rows), "text/csv"); };
+$("dlAor").onclick = () => { if (!SIM) return alert("Run first.");
+  const totRate = SIM.p.wells.reduce((a, w) => a + w.rate_MtYr, 0);
+  const rows = [["year","co2_Mt","plume_Rmax_km","plume_Requiv_km","theis_dP10kPa_km"]];
+  for (let y = 1; y <= SIM.p.totalYears; y++) {
+    const h = SIM.history.reduce((a, b) => Math.abs(b.t_yr - y) < Math.abs(a.t_yr - y) ? b : a);
+    rows.push([y, h.inj_Mt.toFixed(2), h.plumeR_km.toFixed(3), h.plumeRequiv_km.toFixed(3),
+      (theisAOR(SIM.p, Math.min(y, SIM.p.injYears), 10, totRate) / 1e3).toFixed(1)]);
+  } dl("co2sim_aor_table.csv", csv(rows), "text/csv"); };
+$("dlGrid").onclick = () => { if (!SNAPS.length) return alert("Run first.");
+  const sn = SNAPS[SNAPS.length - 1], N = SIM.N, nz = sn.nz || 1, NA = N * N;
+  const rows = [["i","j","k","x_m","y_m","z_m","Sg","P_kPa","dissolved_kg"]];
+  for (let k = 0; k < nz; k++) for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const c = k * NA + j * N + i;
+    rows.push([i + 1, j + 1, k + 1, ((i + 0.5) * SIM.dx).toFixed(1), ((j + 0.5) * SIM.dx).toFixed(1),
+      nz > 1 ? (SIM.p.depth + (k + 0.5) * SIM.dz).toFixed(1) : SIM.p.depth,
+      sn.Sg[c].toFixed(5), (sn.P[c] / 1e3).toFixed(2), sn.mD[c].toFixed(1)]); }
+  dl(`co2sim_grid_yr${sn.yr}.csv`, csv(rows), "text/csv"); };
+$("dlWells").onclick = () => { if (!SIM) return alert("Run first.");
+  const rows = [["t_yr", ...SIM.p.wells.flatMap(w => [w.name + "_rate_td", w.name + "_bhp_MPa", w.name + "_cum_Mt"])]];
+  for (const h of SIM.history) rows.push([h.t_yr.toFixed(3),
+    ...h.wells.flatMap(w => [w.q_td.toFixed(2), w.bhp_MPa.toFixed(4), w.cum_Mt.toFixed(4)])]);
+  dl("co2sim_wells.csv", csv(rows), "text/csv"); };
+
+/* ---- report ---- */
+$("btnReport").onclick = () => {
+  if (!SIM) return alert("Run first.");
+  drawMap(); drawXs();
+  const p = SIM.p, m = SIM.history[SIM.history.length - 1];
+  const imgs = ["cvMap", "cvXs", "chMass", "chBhp", "chRad", "chMon"].map(id => {
+    try { return `<img src="${$(id).toDataURL("image/png")}" style="width:100%;max-width:820px;margin:8px 0">`; }
+    catch (e) { return ""; } }).join("");
+  const win = window.open("", "_blank");
+  win.document.write(`<html><head><title>CO2 Storage Simulation Report</title>
+<style>body{font-family:Arial;margin:30px;color:#1a2733;font-size:13px}h1{color:#0b3954;font-size:20px}h2{color:#0b3954;font-size:15px;border-bottom:1px solid #ccd;padding-bottom:3px}
+table{border-collapse:collapse;width:100%;font-size:12px;margin:8px 0}th{background:#0b3954;color:#fff;padding:5px 8px;text-align:left}td{border-bottom:1px solid #dde;padding:4px 8px}</style></head><body>
+<h1>CO2 Storage Simulation Report — VE Screening Model</h1>
+<p><b>Generated:</b> ${new Date().toISOString().slice(0, 10)} · <b>Tool:</b> SubsurfaceAI Live CO2 Simulator (vertical-equilibrium two-phase FD) · <b>Author of record:</b> ________________ P.Eng.</p>
+<h2>1. Model definition</h2><table>
+<tr><th>Parameter</th><th>Value</th></tr>
+<tr><td>Domain / grid</td><td>${p.L_m / 1000} km × ${p.L_m / 1000} km × ${p.H} m, ${p.NX}×${p.NX} cells</td></tr>
+<tr><td>Depth / P / T</td><td>${p.depth} m / ${p.P0_kPa} kPa / ${p.T_C} °C</td></tr>
+<tr><td>φ / k / NTG / heterogeneity</td><td>${p.phi} / ${p.k_mD} mD / ${p.ntg} / ±${p.hetero_pct}%</td></tr>
+<tr><td>Swi / Sgr / krg,max</td><td>${p.swi} / ${p.sgrmax} / ${p.krgmax}</td></tr>
+<tr><td>Brine TDS / wCO2,eq</td><td>${p.tds_ppm} ppm / ${(BrineProps.wCO2eq(p.P0_kPa, p.T_C, p.tds_ppm) * 100).toFixed(1)} wt%</td></tr>
+<tr><td>ρCO2 / μCO2</td><td>${SIM.rhoG.toFixed(0)} kg/m³ / ${(SIM.muG * 1e3).toFixed(3)} mPa·s</td></tr>
+<tr><td>Wells</td><td>${p.wells.map(w => `${w.name}: ${w.rate_MtYr} Mt/yr @(${w.x_m},${w.y_m}) yr ${w.startYr}–${w.stopYr}, BHP≤${w.bhpMax_kPa} kPa`).join("<br>")}</td></tr>
+<tr><td>Schedule / boundary</td><td>${p.injYears} yr injection + ${p.totalYears - p.injYears} yr monitoring · ${p.openBoundary ? "open" : "closed"} boundary</td></tr></table>
+<h2>2. Key results</h2><table>
+<tr><td>Cumulative injected</td><td>${m.inj_Mt.toFixed(2)} Mt</td></tr>
+<tr><td>Final plume radius (max / area-equiv)</td><td>${m.plumeR_km.toFixed(2)} / ${m.plumeRequiv_km.toFixed(2)} km</td></tr>
+<tr><td>Free / residual / dissolved</td><td>${m.free_Mt.toFixed(2)} / ${m.trap_Mt.toFixed(2)} / ${m.diss_Mt.toFixed(2)} Mt</td></tr>
+<tr><td>Max BHP vs 90% frac</td><td>${Math.max(...SIM.history.map(h => Math.max(...h.wells.map(w => w.bhp_MPa)))).toFixed(2)} vs ${(0.9 * SIM.fracP / 1e6).toFixed(1)} MPa</td></tr>
+<tr><td>Mass balance closure</td><td>${m.mbe_pct.toFixed(3)}%</td></tr></table>
+<h2>3. Compliance &amp; AOR tables</h2>${$("regOut").innerHTML}
+<h2>4. Figures</h2>${imgs}
+<h2>5. Method &amp; limitations</h2>
+<p>Depth-integrated vertical-equilibrium sharp-interface two-phase (CO2/brine) finite-difference model: implicit pressure (preconditioned conjugate gradient), explicit upwind fractional-flow transport with CFL sub-stepping, VE gravity spreading, Land-model residual trapping, rate-limited equilibrium dissolution (salinity-corrected), Peaceman well model with BHP-constraint switching, Dirichlet (open) or no-flow (closed) lateral boundaries. CO2 density from Span-Wagner-anchored lookup; brine properties salinity- and temperature-corrected. This model class is appropriate for AoR delineation, MMV design and sensitivity screening; it does not capture vertical pressure gradients within the storage unit, geochemistry, geomechanics, or thermal effects. Pair with a full 3D compositional simulation for the bounding containment demonstration.</p>
+</body></html>`);
+  win.document.close(); setTimeout(() => win.print(), 600);
+};
+
+/* ---- init ---- */
+applyModel(NISKU);
+</script></body></html>
