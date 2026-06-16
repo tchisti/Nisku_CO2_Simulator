@@ -2,6 +2,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Nisku — Live CO2 Storage Simulator</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+ onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}],throwOnError:false})"></script>
 <style>
 :root{--navy:#0b3954;--acc:#1f9bcf;--bg:#f2f5f7;--ok:#1e8e3e;--warn:#d93025}
 *{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#1a2733;font-size:14px}
@@ -44,10 +48,11 @@ progress{width:260px;height:14px}
 <button data-t="maps">3 · Map View</button><button data-t="xsec">4 · Cross-Section</button>
 <button data-t="series">5 · Time Series</button><button data-t="sens">6 · Sensitivity</button>
 <button data-t="reg">7 · Regulatory</button><button data-t="exp">8 · Export / Report</button>
+<button data-t="theory">9 · Theory &amp; References</button>
 </nav>
 
 <div class="tab on" id="tab-setup">
-<div class="note"><b>Physics envelope:</b> depth-integrated vertical-equilibrium sharp-interface two-phase flow with Land residual trapping and equilibrium dissolution — the model class used for CCS screening and AOR delineation (accepted in EPA Class VI AoR evaluations and AER D065 supporting analyses). For the full 3D compositional containment demonstration, pair with the CMG-GEM decks (<code>Wabamun_Nisku_CCS_V8*.dat</code>) built alongside this tool.</div>
+<div class="note"><b>Physics envelope:</b> depth-integrated vertical-equilibrium sharp-interface two-phase flow with Land (1968) residual trapping and pressure-dependent rate-limited dissolution (Duan-anchored equilibrium) — the model class used for CCS screening and AOR delineation (accepted in EPA Class VI AoR evaluations and AER D065 supporting analyses). Full governing equations and references are documented on the <b>Theory &amp; References</b> tab. For the full 3D compositional containment demonstration, pair with the CMG-GEM decks (<code>Wabamun_Nisku_CCS_V8*.dat</code>) built alongside this tool.</div>
 <div class="flex noprint"><button class="btn" id="btnPreset">Load Nisku V8 Preset (Wabamun)</button>
 <button class="btn gray" id="btnSaveModel">Save model (.json)</button>
 <label style="display:inline;width:auto" class="btn gray">Load model (.json)<input type="file" id="fileModel" accept=".json" style="display:none"></label></div>
@@ -82,7 +87,8 @@ progress{width:260px;height:14px}
 <div><label>Sgr max (Land)</label><input id="sgr" type="number" step="0.01" value="0.12"></div>
 <div><label>krg max</label><input id="krg" type="number" step="0.01" value="0.80"></div>
 <div><label>Frac gradient (kPa/m)</label><input id="fg" type="number" value="20"></div>
-</div></div>
+<div><label>Dissolution rate kd (/yr)</label><input id="kdiss" type="number" step="0.1" value="1.2"></div>
+</div><div style="font-size:11px;color:#666;margin-top:4px">kd = first-order rate constant for approach to Duan-anchored equilibrium dissolved fraction (P-, T-, salinity-dependent). Default 1.2 /yr ≈ 0.6 yr half-time.</div></div>
 <div class="card"><h3>Schedule &amp; Boundary</h3><div class="grid3">
 <div><label>Injection (yr)</label><input id="injY" type="number" value="10"></div>
 <div><label>Total (yr)</label><input id="totY" type="number" value="15"></div>
@@ -136,6 +142,111 @@ progress{width:260px;height:14px}
 <div class="card"><h3>Report</h3>
 <p style="font-size:12px">Generates a print-ready regulatory summary (parameters, results, compliance tables, figures). Use the browser print dialog → Save as PDF.</p>
 <button class="btn green" id="btnReport">Generate report (PDF via print)</button></div></div>
+
+<div class="tab" id="tab-theory">
+<div class="note"><b>Audience:</b> reservoir / CCS engineer reviewer (5-minute skim). This tab documents the governing equations, constitutive models, trapping mechanisms, numerical scheme, and analytical complements implemented in the simulator, with citations to the original sources. Every equation below is wired into the JavaScript engine — file references point to <code>index.html</code> line numbers.</div>
+
+<div class="card"><h3>0. Scope &amp; model lineage</h3>
+<p style="font-size:13px;line-height:1.55">This tool is a <b>depth-integrated vertical-equilibrium (VE) sharp-interface two-phase CO₂/brine simulator</b> with an optional fully-resolved 3D layered engine. The VE class trades vertical resolution for speed (seconds per scenario) and is the standard screening-tier model used in CCS site characterization, AoR delineation, and Class VI permit-support work. Lineage: Coats et al. (1971) <a href="#R-coats">[1]</a> introduced VE in steamflood modelling; Nordbotten &amp; Celia (2005) <a href="#R-nc">[2]</a> formalised it for CO₂ storage; the MRST-VE module (Lie 2019) <a href="#R-mrst">[3]</a> is the open-source reference implementation.</p>
+<p style="font-size:13px;line-height:1.55"><b>What it is for:</b> screening, sensitivity analysis, AoR (40 CFR 146.84), AER D065 supporting analysis, multi-well rate optimisation. <b>What it is NOT for:</b> compositional containment demonstration (use the paired CMG-GEM V8 decks), geochemical mineral trapping over centuries, geomechanical fault reactivation, or wellbore integrity. Honest limits are listed in §6.</p></div>
+
+<div class="card"><h3>1. Governing equations</h3>
+<p style="font-size:13px"><b>(1.1) Component mass conservation</b> for phase $\alpha \in \{g, w\}$ over depth-integrated cell volume:</p>
+<p>$$\frac{\partial}{\partial t}\!\left(\phi\, H\, \rho_\alpha\, S_\alpha\right) + \nabla \!\cdot\! \left(\rho_\alpha\, \mathbf{u}_\alpha\right) \;=\; q_\alpha \;\pm\; r_{diss}$$</p>
+<p style="font-size:13px;color:#444">Gas phase carries a dissolution sink $-r_{diss}$; brine phase carries the corresponding $+r_{diss}$. Code: <code>index.html:309–387</code> (VE), <code>:584–712</code> (3D).</p>
+
+<p style="font-size:13px"><b>(1.2) Multiphase Darcy</b>:</p>
+<p>$$\mathbf{u}_\alpha \;=\; -\frac{k\, k_{r\alpha}(S_g)}{\mu_\alpha}\bigl(\nabla P - \rho_\alpha g\, \nabla z\bigr)$$</p>
+<p style="font-size:13px;color:#444">Capillary pressure neglected at VE screening tier (typical CCS reservoirs at supercritical conditions: $P_c \ll \Delta P$). Code: pressure assembly <code>:254–307</code> (VE), <code>:515–583</code> (3D).</p>
+
+<p style="font-size:13px"><b>(1.3) Vertical-equilibrium reduction</b> (Nordbotten–Celia 2005): assume vertical pressure gradient is hydrostatic in each phase and saturations stratify by gravity. CO₂ column thickness from the formation top:</p>
+<p>$$h(x,y,t) \;=\; \frac{S_g(x,y,t)\, H}{1 - S_{wi}}$$</p>
+<p style="font-size:13px;color:#444">Used for cross-section reconstruction (<code>:115</code>) and gravity-spreading flux (<code>:357–367</code>).</p>
+
+<p style="font-size:13px"><b>(1.4) VE gravity spreading flux</b> (sharp-interface):</p>
+<p>$$F_{grav} \;=\; \frac{k\, k_{rg,\max}}{\mu_g}\,(\rho_w - \rho_g)\, g\, h\, \frac{\partial h}{\partial x}$$</p>
+<p style="font-size:13px;color:#444">Direct implementation at <code>:361–362</code>; stability-capped at 20% of cell pore volume per substep.</p>
+</div>
+
+<div class="card"><h3>2. Constitutive models</h3>
+<table>
+<tr><th>Property</th><th>Model used</th><th>Code</th><th>Reference</th></tr>
+<tr><td>CO₂ density $\rho_g(P,T)$</td><td>Bilinear interpolation of a Span–Wagner-anchored table (8–30 MPa, 30–80 °C)</td><td><code>:153–172</code></td><td>Span &amp; Wagner 1996 <a href="#R-sw">[4]</a></td></tr>
+<tr><td>CO₂ viscosity $\mu_g(\rho)$</td><td>$\mu_g = (0.015 + 2{\cdot}10^{-5}\rho + 5.2{\cdot}10^{-8}\rho^2)\times 10^{-3}$ Pa·s</td><td><code>:173</code></td><td>Fenghour–Wakeham–Vesovic 1998 <a href="#R-fwv">[5]</a> fit</td></tr>
+<tr><td>Brine density $\rho_w(T, TDS)$</td><td>$\rho_w = 1000 - 0.40(T-20) + 7{\cdot}10^{-4}\,TDS$ kg/m³</td><td><code>:176</code></td><td>Batzle &amp; Wang 1992 <a href="#R-bw">[6]</a> screening fit</td></tr>
+<tr><td>Brine viscosity $\mu_w(T, TDS)$</td><td>Vogel–Tammann–Fulcher water + salinity correction</td><td><code>:177–180</code></td><td>Kestin et al. 1981 <a href="#R-kestin">[7]</a></td></tr>
+<tr><td>Equilibrium dissolved CO₂ fraction $w^{eq}_{CO_2}$</td><td>$0.050\,(P/12.3)^{0.55}\,[1-0.0045(T-55)]\,e^{-0.12 m}$ (kg/kg brine)</td><td><code>:182–188</code></td><td>Duan &amp; Sun 2003 <a href="#R-duan">[8]</a> anchored</td></tr>
+<tr><td>Rel-perm $k_{rg}, k_{rw}$</td><td>VE: linear; 3D: Corey ($n_g{=}2$, $n_w{=}4$); $S_e = (S_g - S_{gr})/(1 - S_{wi} - S_{gr})$</td><td><code>:244–249</code>, <code>:506–513</code></td><td>Brooks &amp; Corey 1964 <a href="#R-bc">[9]</a></td></tr>
+<tr><td>Residual gas trapping $S_{gr}(S_{g,\max})$</td><td>$S_{gr} = S_{g,\max}/(1 + C\, S_{g,\max})$, $C = 1/S_{gr,\max} - 1/(1-S_{wi})$</td><td><code>:224</code>, <code>:238–243</code></td><td>Land 1968 <a href="#R-land">[10]</a></td></tr>
+</table>
+</div>
+
+<div class="card"><h3>3. Trapping mechanisms (IPCC SRCCS classification)</h3>
+<table>
+<tr><th>#</th><th>Mechanism</th><th>Equation / criterion</th><th>This simulator</th></tr>
+<tr><td>1</td><td>Structural / stratigraphic</td><td>Caprock seal capacity vs. column buoyancy: $\Delta P_{buoy} = (\rho_w - \rho_g)\,g\,h_{col} < P_{e,seal}$; injection BHP $< 90\%\, P_{frac}$</td><td><b>Implicit</b> — closed-boundary option + fracture-pressure compliance check at <code>:230</code>, <code>:321–326</code></td></tr>
+<tr><td>2</td><td>Residual (capillary) trapping</td><td>Land (1968) hysteresis, eq. above; $S_{gr,\max}$ user input (default 0.12)</td><td><b>Active</b> — <code>:224</code>, <code>:238–243</code>, <code>:500–505</code></td></tr>
+<tr><td>3</td><td>Solubility (dissolution) trapping</td><td>$\dot m_{diss} \;=\; k_d \bigl[w^{eq}_{CO_2}(P_c, T, m_{salt})\, m_{brine,c} - m_{diss,c}\bigr]$, capped by free gas mass; $w^{eq}$ re-evaluated each step at <i>current cell pressure</i></td><td><b>Active</b> — <code>:376–388</code> (VE), <code>:703–715</code> (3D); $k_d$ user-tunable (Setup tab)</td></tr>
+<tr><td>4</td><td>Mineral trapping (carbonate precipitation)</td><td>$\mathrm{CO_2(aq) + H_2O + Ca^{2+} \rightarrow CaCO_3 + 2H^+}$ on $10^2$–$10^4$ yr timescale</td><td><b>Not modeled</b> — out of scope for ≤100 yr screening; use TOUGHREACT / GEM-GHG for kinetics</td></tr>
+</table>
+<p style="font-size:12px;color:#666;margin-top:6px">Framework: IPCC (2005) <a href="#R-ipcc">[11]</a>; trapping inventory accounting follows Bachu (2015) <a href="#R-bachu">[12]</a>. Mass-balance partitioning of free / residual / dissolved is reported at <code>:407–417</code> and rendered on the Time-Series tab.</p>
+</div>
+
+<div class="card"><h3>4. Numerical scheme</h3>
+<table>
+<tr><th>Stage</th><th>Method</th><th>Code</th></tr>
+<tr><td>Pressure</td><td>Fully implicit IMPES with total-mobility weighting on cell faces (harmonic $k$, arithmetic $\lambda_T$); preconditioned conjugate gradient (Jacobi), tol $10^{-12}$ rel.</td><td><code>:254–307</code>, <code>:515–583</code></td></tr>
+<tr><td>Transport</td><td>Explicit upwind fractional-flow $f_g = \lambda_g/(\lambda_g+\lambda_w)$ on cell-centered finite volumes</td><td><code>:344–375</code>, <code>:652–692</code></td></tr>
+<tr><td>CFL substepping</td><td>$\Delta t_{sub} = \Delta t / n_{sub}$, with $n_{sub} = \lceil \max_c |\sum_n T_{cn}(P_c-P_n)|\,\Delta t / (0.25\, V_{p,c}) \rceil$</td><td><code>:333–342</code></td></tr>
+<tr><td>Gravity spreading</td><td>VE: sharp-interface buoyant flux capped at 20% of $V_p$ per substep. 3D: counter-current buoyancy with mobility-weighted face density</td><td><code>:357–367</code>, <code>:665–676</code></td></tr>
+<tr><td>Well model</td><td>Peaceman (1978) <a href="#R-peace">[13]</a> well index $WI = 2\pi k H\,\mathrm{NTG}/\ln(0.2\,\Delta x/r_w)$; rate target with BHP cap; 3D engine distributes by layer-WI</td><td><code>:317–326</code>, <code>:486–491</code>, <code>:587–611</code></td></tr>
+<tr><td>Mass-balance closure</td><td>$MBE\% = 100 (m_{free}+m_{trap}+m_{diss}-m_{inj})/m_{inj}$; compliance target $|MBE| < 1\%$</td><td><code>:410</code>, <code>:740</code></td></tr>
+</table>
+</div>
+
+<div class="card"><h3>5. Far-field pressure (Theis 1935)</h3>
+<p style="font-size:13px">Beyond the grid, single-phase brine pressure transient is approximated by the Theis solution to bracket the AoR pressure-front radius (criterion: $\Delta P > 10$ kPa per 40 CFR 146.84(c)(1)):</p>
+<p>$$\Delta P(r,t) \;=\; \frac{Q\,\mu_w}{4\pi\, k\, H_{eff}}\, W(u), \qquad u \;=\; \frac{r^2\,\phi\,\mu_w\,c_t}{4\,k\,t}, \qquad W(u) \approx -\gamma - \ln u$$</p>
+<p style="font-size:13px;color:#444">Total compressibility $c_t = c_r + c_w \approx c_r + 4.6{\cdot}10^{-10}$ Pa⁻¹. Implemented at <code>:432–443</code>; results enter the regulatory AoR table.</p>
+</div>
+
+<div class="card"><h3>6. Regulatory acceptance &amp; honest limits</h3>
+<p style="font-size:13px"><b>Accepted use:</b> EPA Class VI 40 CFR 146.84 allows "computational modeling of appropriate complexity" for AoR delineation; VE/sharp-interface models are explicitly cited in EPA's AoR delineation guidance <a href="#R-epa">[14]</a>. AER Directive 065 <a href="#R-aer">[15]</a> accepts screening-class numerical simulation as supporting evidence in Scheme Applications.</p>
+<p style="font-size:13px"><b>Limits this model does not cover</b> (use full compositional 3D + geomechanics for these):</p>
+<ul style="font-size:13px;line-height:1.55">
+<li>Capillary heterogeneity below grid scale (sub-seismic shale baffles) — handled via NTG &amp; heterogeneity ±% knob only</li>
+<li>Non-isothermal effects (Joule-Thomson cooling near wellbore)</li>
+<li>Mineral trapping kinetics (10²–10⁴ yr)</li>
+<li>Geomechanical caprock failure / induced seismicity — covered by fracture-pressure compliance check only</li>
+<li>Halite precipitation / salt-out near injector (relevant at high salinity &amp; dry CO₂)</li>
+<li>Wellbore integrity (zonal isolation, cement degradation)</li>
+</ul>
+</div>
+
+<div class="card"><h3>7. References</h3>
+<ol style="font-size:12px;line-height:1.6;padding-left:24px">
+<li id="R-coats"><b>Coats, K.H., George, W.D., Chu, C., Marcum, B.E.</b> (1971). Three-Dimensional Simulation of Steamflooding. <i>SPE Journal</i> 14(6), SPE-3416. — Origin of vertical-equilibrium reduction.</li>
+<li id="R-nc"><b>Nordbotten, J.M., Celia, M.A.</b> (2005). Similarity solutions for fluid injection into confined aquifers. <i>J. Fluid Mech.</i> 561, 307–327; and <i>Water Resour. Res.</i> 41, W12404. — VE theory for CO₂ storage.</li>
+<li id="R-mrst"><b>Lie, K.-A.</b> (2019). <i>An Introduction to Reservoir Simulation Using MATLAB/GNU Octave: User Guide for MRST</i>. Cambridge Univ. Press. — Open-source VE reference implementation (MRST-co2lab).</li>
+<li id="R-sw"><b>Span, R., Wagner, W.</b> (1996). A New Equation of State for Carbon Dioxide Covering the Fluid Region from the Triple-Point Temperature to 1100 K at Pressures up to 800 MPa. <i>J. Phys. Chem. Ref. Data</i> 25(6), 1509–1596.</li>
+<li id="R-fwv"><b>Fenghour, A., Wakeham, W.A., Vesovic, V.</b> (1998). The Viscosity of Carbon Dioxide. <i>J. Phys. Chem. Ref. Data</i> 27(1), 31–44.</li>
+<li id="R-bw"><b>Batzle, M., Wang, Z.</b> (1992). Seismic properties of pore fluids. <i>Geophysics</i> 57(11), 1396–1408.</li>
+<li id="R-kestin"><b>Kestin, J., Khalifa, H.E., Correia, R.J.</b> (1981). Tables of the dynamic and kinematic viscosity of aqueous NaCl solutions in the temperature range 20–150 °C and the pressure range 0.1–35 MPa. <i>J. Phys. Chem. Ref. Data</i> 10(1), 71–87.</li>
+<li id="R-duan"><b>Duan, Z., Sun, R.</b> (2003). An improved model calculating CO₂ solubility in pure water and aqueous NaCl solutions from 273 to 533 K and from 0 to 2000 bar. <i>Chem. Geol.</i> 193, 257–271.</li>
+<li id="R-bc"><b>Brooks, R.H., Corey, A.T.</b> (1964). Hydraulic Properties of Porous Media. <i>Hydrology Papers 3</i>, Colorado State University.</li>
+<li id="R-land"><b>Land, C.S.</b> (1968). Calculation of imbibition relative permeability for two- and three-phase flow from rock properties. <i>SPE Journal</i> 8(2), 149–156.</li>
+<li id="R-ipcc"><b>IPCC</b> (2005). <i>IPCC Special Report on Carbon Dioxide Capture and Storage</i> (Metz, B. et al., eds.). Cambridge Univ. Press, 442 pp.</li>
+<li id="R-bachu"><b>Bachu, S.</b> (2015). Review of CO₂ storage efficiency in deep saline aquifers. <i>International Journal of Greenhouse Gas Control</i> 40, 188–202.</li>
+<li id="R-peace"><b>Peaceman, D.W.</b> (1978). Interpretation of Well-Block Pressures in Numerical Reservoir Simulation. <i>SPE Journal</i> 18(3), 183–194.</li>
+<li id="R-theis"><b>Theis, C.V.</b> (1935). The relation between the lowering of the piezometric surface and the rate and duration of discharge of a well using ground-water storage. <i>Trans. AGU</i> 16, 519–524.</li>
+<li id="R-epa"><b>US EPA</b> (2010, 2013). Federal Requirements Under the UIC Program for CO₂ Geologic Sequestration Wells (40 CFR Parts 124, 144, 145, 146, 147 — Class VI); <i>Geologic Sequestration of Carbon Dioxide: Underground Injection Control (UIC) Program Class VI Well Area of Review Evaluation and Corrective Action Guidance</i>, EPA 816-R-13-005.</li>
+<li id="R-aer"><b>Alberta Energy Regulator</b> (2017). <i>Directive 065: Resources Applications for Oil and Gas Reservoirs</i>. AER, Calgary, AB.</li>
+<li id="R-aziz"><b>Aziz, K., Settari, A.</b> (1979). <i>Petroleum Reservoir Simulation</i>. Applied Science Publishers. — IMPES, transmissibility, numerics.</li>
+</ol>
+<p style="font-size:11px;color:#888;margin-top:10px">Engine identity for the audit trail: <b>SubsurfaceAI VE / 3D Layered Engine</b> · pure-JS implementation · MIT-style license · lineage MRST-co2lab (academic open source). Git: <code>github.com/tchisti/Nisku_CO2_Simulator</code>.</p>
+</div>
+</div>
+
 <script>
 /* =====================================================================
    SubsurfaceAI — Live CO2 Storage Simulator: VE ENGINE (pure JS)
@@ -373,14 +484,17 @@ class VESim {
         if (this.Sg[c] > this.SgMax[c]) this.SgMax[c] = this.Sg[c];
       }
     }
-    // dissolution (rate-limited approach to equilibrium)
-    const kDiss = 0.10;                                       // fraction of deficit per 30 d
+    // dissolution: rate-limited approach to Duan-anchored equilibrium evaluated at current cell P
+    // kd = first-order rate constant (1/yr); per-step fraction of deficit = kd * dtDays/365.25
+    const kd = (p.kDiss_perYr ?? 1.2);
+    const frac = kd * dtDays / 365.25;
     for (let c = 0; c < this.NC; c++) {
       if (this.Sg[c] <= 0 && this.mDiss[c] <= 0) continue;
-      const brineMass = this.Vp[c] * (1 - this.Sg[c]) / Math.max(this.phi[c],1e-9) * this.phi[c] * this.rhoB;
-      const cap = Math.max(brineMass * this.wEq - this.mDiss[c], 0);
+      const brineMass = this.Vp[c] * (1 - this.Sg[c]) * this.rhoB;
+      const wEqC = BrineProps.wCO2eq(this.P[c] / 1e3, p.T_C, p.tds_ppm);
+      const cap = Math.max(brineMass * wEqC - this.mDiss[c], 0);
       const avail = this.Sg[c] * this.Vp[c] * this.rhoG;
-      const dm = Math.min(cap * kDiss * dtDays / 30, avail);
+      const dm = Math.min(cap * frac, avail);
       if (dm > 0) { this.mDiss[c] += dm; this.Sg[c] -= dm / (this.Vp[c] * this.rhoG); }
     }
     this.t += dtDays;
@@ -700,12 +814,14 @@ class Sim3D {
         this.warnings.push(`Yr ${(this.t / 365.25).toFixed(1)}: ${w.name} volumetrically limited`);
       }
     }
-    // dissolution
-    const kD = 0.10;
+    // dissolution: per-cell P-dependent equilibrium, first-order approach (Duan-anchored)
+    const kd = (p.kDiss_perYr ?? 1.2);
+    const frac = kd * dtDays / 365.25;
     for (const c of act) {
       if (this.Sg[c] <= 0) continue;
-      const cap = Math.max(this.Vp[c] * (1 - this.Sg[c]) * this.rhoB * this.wEq - this.mDiss[c], 0);
-      const dm = Math.min(cap * kD * dtDays / 30, this.Sg[c] * this.Vp[c] * this.rhoG);
+      const wEqC = BrineProps.wCO2eq(this.P[c] / 1e3, p.T_C, p.tds_ppm);
+      const cap = Math.max(this.Vp[c] * (1 - this.Sg[c]) * this.rhoB * wEqC - this.mDiss[c], 0);
+      const dm = Math.min(cap * frac, this.Sg[c] * this.Vp[c] * this.rhoG);
       if (dm > 0) { this.mDiss[c] += dm; this.Sg[c] -= dm / (this.Vp[c] * this.rhoG); }
     }
     this.t += dtDays;
@@ -777,6 +893,9 @@ document.querySelectorAll("#nav button").forEach(b => b.onclick = () => {
   b.classList.add("on"); $("tab-" + b.dataset.t).classList.add("on");
   if (b.dataset.t === "maps") drawMap();
   if (b.dataset.t === "xsec") drawXs();
+  if (b.dataset.t === "theory" && window.renderMathInElement)
+    window.renderMathInElement($("tab-theory"), {delimiters:[
+      {left:"$$",right:"$$",display:true},{left:"$",right:"$",display:false}],throwOnError:false});
 });
 
 /* ---- wells tables ---- */
@@ -843,6 +962,7 @@ function readModel() {
     cr_perkPa: +$("cr").value, P0_kPa: +$("P0").value, T_C: +$("T_C").value,
     tds_ppm: +$("tds").value, swi: +$("swi").value, sgrmax: +$("sgr").value,
     krgmax: +$("krg").value, fracGrad_kPam: +$("fg").value,
+    kDiss_perYr: +($("kdiss").value || 1.2),
     openBoundary: $("bnd").value === "1", hetero_pct: +$("het").value, seed: +$("seed").value,
     rhoCO2_override: +$("rhoOv").value, wells: readWells(), monitors: readMons(),
     injYears: +$("injY").value, totalYears: +$("totY").value, reportDays: +$("repD").value,
@@ -852,7 +972,7 @@ function readModel() {
 function applyModel(p) {
   const map = {L_m:"L_m",NX:"NX",H:"H",depth:"depth",phi:"phi",k_mD:"k_mD",ntg:"ntg",
     cr_perkPa:"cr",P0_kPa:"P0",T_C:"T_C",tds_ppm:"tds",swi:"swi",sgrmax:"sgr",krgmax:"krg",
-    fracGrad_kPam:"fg",hetero_pct:"het",seed:"seed",rhoCO2_override:"rhoOv",
+    fracGrad_kPam:"fg",kDiss_perYr:"kdiss",hetero_pct:"het",seed:"seed",rhoCO2_override:"rhoOv",
     injYears:"injY",totalYears:"totY",reportDays:"repD"};
   for (const [k, id] of Object.entries(map)) if (p[k] !== undefined) $(id).value = p[k];
   $("bnd").value = p.openBoundary ? "1" : "0";
@@ -867,7 +987,7 @@ function applyModel(p) {
 }
 const NISKU = {L_m: 10000, NX: 50, H: 50, depth: 1250, phi: 0.0761, k_mD: 1311, ntg: 0.70, kvkh: 0.155,
   engine: "ve", NZ: 10, layers: NISKU_LAYERS, cr_perkPa: 5e-7, P0_kPa: 12263, T_C: 55, tds_ppm: 150000, swi: 0.22, sgrmax: 0.12,
-  krgmax: 0.80, fracGrad_kPam: 20, openBoundary: true, hetero_pct: 0, seed: 42,
+  krgmax: 0.80, fracGrad_kPam: 20, kDiss_perYr: 1.2, openBoundary: true, hetero_pct: 0, seed: 42,
   rhoCO2_override: 640, injYears: 10, totalYears: 15, reportDays: 30,
   wells: [{name: "CO2-INJ-1", x_m: 5000, y_m: 5000, rate_MtYr: 1.0, startYr: 0, stopYr: 10, bhpMax_kPa: 22500}],
   monitors: [{name: "OBS-MW-1", x_m: 6344, y_m: 5000}, {name: "OBS-MW-2", x_m: 5000, y_m: 6963}]};
