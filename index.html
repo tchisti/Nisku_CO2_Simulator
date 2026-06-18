@@ -108,10 +108,16 @@ progress{width:260px;height:14px}
 
 <div class="tab" id="tab-maps">
 <div class="flex noprint"><label style="width:auto">Property</label>
-<select id="mapProp" style="width:auto"><option value="sg">Gas saturation SG</option><option value="dp">ΔP (kPa)</option><option value="diss">Dissolved CO2 (kg/m²)</option></select>
+<select id="mapProp" style="width:auto">
+<option value="sg">Total gas saturation Sg</option>
+<option value="sgm">Mobile gas Sg (free-phase plume, EPA Class VI)</option>
+<option value="dp">Pressure perturbation ΔP (kPa)</option>
+<option value="diss">Dissolved CO₂ (kg/m²)</option>
+</select>
 <label style="width:auto">Layer</label><select id="mapK" style="width:auto"><option value="-1">Max over K</option></select>
 <label style="width:auto">Time</label><input id="mapT" type="range" min="0" max="0" value="0" style="width:240px"><span id="mapTlab"></span></div>
-<canvas id="cvMap" class="map" width="760" height="800"></canvas></div>
+<div id="mapCaption" style="font-size:11px;color:#555;margin:4px 0 8px 0;line-height:1.4"></div>
+<canvas id="cvMap" class="map" width="820" height="720"></canvas></div>
 
 <div class="tab" id="tab-xsec">
 <div class="flex noprint"><label style="width:auto">Through well</label><select id="xsWell" style="width:auto"></select>
@@ -215,6 +221,7 @@ progress{width:260px;height:14px}
 <p style="font-size:13px"><b>Limits this model does not cover</b> (use full compositional 3D + geomechanics for these):</p>
 <ul style="font-size:13px;line-height:1.55">
 <li>Capillary heterogeneity below grid scale (sub-seismic shale baffles) — handled via NTG &amp; heterogeneity ±% knob only</li>
+<li>Density-driven convective dissolution (Ennis-King &amp; Paterson 2005). VE-class models compute dissolution at the gas–brine contact but do not resolve the downward convective fingering of CO₂-saturated brine. Late-time dissolved-CO₂ mass and footprint are therefore <i>lower bounds</i>; for centennial-scale dissolved spreading, use TOUGH2 / CMG-GEM with a Rayleigh-criterion mesh.</li>
 <li>Non-isothermal effects (Joule-Thomson cooling near wellbore)</li>
 <li>Mineral trapping kinetics (10²–10⁴ yr)</li>
 <li>Geomechanical caprock failure / induced seismicity — covered by fracture-pressure compliance check only</li>
@@ -1030,7 +1037,9 @@ async function runSim() {
         if (SIM.t / 365.25 >= nextSnap - 1e-6) {
           SNAPS.push({yr: Math.round(SIM.t / 365.25 * 10) / 10,
             Sg: Float32Array.from(SIM.Sg), P: Float32Array.from(SIM.P),
-            mD: Float32Array.from(SIM.mDiss), nz: SIM.is3D ? SIM.NZ : 1});
+            mD: Float32Array.from(SIM.mDiss),
+            SgMax: Float32Array.from(SIM.SgMax),
+            nz: SIM.is3D ? SIM.NZ : 1});
           nextSnap += 1;
         }
       }
@@ -1075,70 +1084,222 @@ function setupSliders() {
   ["mapT", "xsT"].forEach(id => { $(id).max = SNAPS.length - 1; $(id).value = SNAPS.length - 1; });
   $("xsWell").innerHTML = readModel().wells.map((w, i) => `<option value="${i}">${w.name}</option>`).join("");
   const nz = SIM.is3D ? SIM.NZ : 1;
-  $("mapK").innerHTML = '<option value="-1">Max over K</option>' +
-    Array.from({length: nz}, (_, k) => `<option value="${k}">K${k + 1}${nz > 1 ? (k === 0 ? " (top)" : k === nz - 1 ? " (base)" : "") : ""}</option>`).join("");
+  if (nz === 1) {
+    $("mapK").innerHTML = '<option value="-1">Column-integrated (VE)</option>';
+  } else {
+    $("mapK").innerHTML = '<option value="-1">Max over K (footprint)</option>' +
+      '<option value="0">K1 (top — caprock interface)</option>' +
+      Array.from({length: nz - 2}, (_, k) => `<option value="${k + 1}">K${k + 2}</option>`).join("") +
+      `<option value="${nz - 1}">K${nz} (base)</option>`;
+  }
 }
 $("mapK").onchange = () => drawMap();
-$("mapT").oninput = drawMap; $("mapProp").onchange = drawMap;
+$("mapT").oninput = drawMap;
+$("mapProp").onchange = () => { updateMapCaption(); drawMap(); };
+updateMapCaption();
 $("xsT").oninput = drawXs; $("xsWell").onchange = drawXs; $("xsDir").onchange = drawXs;
+/* property captions: per-property physical interpretation shown below map controls */
+const MAP_CAPTIONS = {
+  sg:   "Total gas saturation Sg (mobile + residually trapped, fraction of pore volume). Plume footprint per EPA 40 CFR 146.84 free-phase delineation.",
+  sgm:  "Mobile (free-phase) gas Sg = Sg − S_gr(S_g,max), per Land (1968) hysteresis. This is the migrating plume the regulator cares about for plume-stabilization criterion (40 CFR 146.93).",
+  dp:   "Pressure perturbation ΔP from initial reservoir pressure. AoR (40 CFR 146.84(c)(1)) typically uses ΔP > 10 kPa as the pressure-front criterion.",
+  diss: "Depth-integrated dissolved CO₂ mass per unit map area. Note: VE-class models do not capture density-driven convective fingering (Ennis-King & Paterson 2005) — late-time dissolved spreading is a lower bound."
+};
+function updateMapCaption() {
+  const el = $("mapCaption"); if (!el) return;
+  el.textContent = MAP_CAPTIONS[$("mapProp").value] || "";
+}
+
 function drawMap() {
   if (!SIM || !SNAPS.length) return;
   const sn = SNAPS[+$("mapT").value], p = SIM.p, N = SIM.N,
         cv = $("cvMap"), g = cv.getContext("2d"), prop = $("mapProp").value;
   $("mapTlab").textContent = "Year " + sn.yr;
-  const W = cv.width, Hpx = 700, cs = Math.floor(Math.min(W - 90, Hpx) / N);
+  updateMapCaption();
+
+  // ---- layout
+  const margin = {l: 60, t: 34, r: 130, b: 60};
+  const mapBox = Math.min(cv.width - margin.l - margin.r, cv.height - margin.t - margin.b);
+  const cs = Math.max(1, Math.floor(mapBox / N));
+  const gridSize = N * cs;
+  const x0 = margin.l, y0 = margin.t;
+
   g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
-  let get, vmax, label;
+
+  // ---- property accessor
   const NA = N * N, nz = sn.nz || 1, kSel = +($("mapK").value);
-  const pick = (arr, c, agg) => {
-    if (nz === 1) return arr[c];
-    if (kSel >= 0) return arr[kSel * NA + c];
-    let v = 0; for (let k = 0; k < nz; k++) v = agg(v, arr[k * NA + c]); return v;
+  const swi = p.swi, sgrm = p.sgrmax;
+  const LandC = 1 / sgrm - 1 / (1 - swi);
+  const mobileSg = (sg, sgmax) => {
+    if (!(sgmax > 0)) return 0;
+    if (sg >= sgmax - 1e-9) return sg;            // drainage branch
+    const sgt = Math.min(sgmax / (1 + LandC * sgmax), sg);
+    return Math.max(sg - sgt, 0);
   };
-  const kLab = nz > 1 ? (kSel >= 0 ? ` K${kSel + 1}` : " (max K)") : "";
-  if (prop === "sg") { get = c => pick(sn.Sg, c, Math.max); vmax = 0.8; label = "SG" + kLab; }
-  else if (prop === "dp") {
+  const layerVal = (arr, c, k) => arr[k * NA + c];
+  const pickMax = (arr, c) => {
+    if (nz === 1) return arr[c];
+    if (kSel >= 0) return layerVal(arr, c, kSel);
+    let v = 0; for (let k = 0; k < nz; k++) v = Math.max(v, layerVal(arr, c, k)); return v;
+  };
+  const pickSum = (arr, c) => {
+    if (nz === 1) return arr[c];
+    if (kSel >= 0) return layerVal(arr, c, kSel);
+    let v = 0; for (let k = 0; k < nz; k++) v += layerVal(arr, c, k); return v;
+  };
+  const mobileAt = c => {
+    if (!sn.SgMax) return 0;
+    if (nz === 1) return mobileSg(sn.Sg[c], sn.SgMax[c]);
+    if (kSel >= 0) return mobileSg(layerVal(sn.Sg, c, kSel), layerVal(sn.SgMax, c, kSel));
+    let m = 0;
+    for (let k = 0; k < nz; k++) m = Math.max(m, mobileSg(layerVal(sn.Sg, c, k), layerVal(sn.SgMax, c, k)));
+    return m;
+  };
+
+  let get, vmax, unit, propName, contour = false, vmin = 0;
+  const kLab = nz > 1 ? (kSel >= 0 ? ` (K${kSel + 1})` : " (max over K)") : " (column-integrated)";
+
+  if (prop === "sg") {
+    get = c => pickMax(sn.Sg, c);
+    vmax = +(1 - swi).toFixed(2); unit = "—";
+    propName = "Total gas saturation Sg"; contour = true;
+  } else if (prop === "sgm") {
+    get = mobileAt;
+    vmax = +(1 - swi).toFixed(2); unit = "—";
+    propName = "Mobile gas Sg (free phase)"; contour = true;
+  } else if (prop === "dp") {
     get = c => {
       if (nz === 1) return (sn.P[c] - p.P0_kPa * 1e3) / 1e3;
       const k = kSel >= 0 ? kSel : 0;
-      return (sn.P[k * NA + c] - (p.P0_kPa * 1e3 + SIM.rhoB * 9.81 * ((k + 0.5) * SIM.dz))) / 1e3;
-    }; vmax = 400; label = "ΔP (kPa)" + kLab;
+      return (layerVal(sn.P, c, k) - (p.P0_kPa * 1e3 + SIM.rhoB * 9.81 * ((k + 0.5) * SIM.dz))) / 1e3;
+    };
+    unit = "kPa"; propName = "Pressure perturbation ΔP";
+  } else {
+    get = c => pickSum(sn.mD, c) / (SIM.dx * SIM.dx);
+    unit = "kg/m²"; propName = "Dissolved CO₂ (depth-integrated)";
   }
-  else { get = c => { let v = 0;
-      if (nz === 1) v = sn.mD[c]; else if (kSel >= 0) v = sn.mD[kSel * NA + c];
-      else for (let k = 0; k < nz; k++) v += sn.mD[k * NA + c];
-      return v / (SIM.dx * SIM.dx); }; vmax = 30; label = "Dissolved (kg/m²)" + kLab; }
+
+  // ---- auto-scale vmax for ΔP and Dissolved (97th-percentile, rounded to nice number)
+  if (prop === "dp" || prop === "diss") {
+    const vals = new Float64Array(NA);
+    let vMaxRaw = 0;
+    for (let c = 0; c < NA; c++) { const v = Math.max(0, get(c)); vals[c] = v; if (v > vMaxRaw) vMaxRaw = v; }
+    vals.sort();
+    const p97 = vals[Math.min(NA - 1, Math.floor(NA * 0.97))];
+    let target = Math.max(p97, vMaxRaw * 0.6);     // ensure peaks visible
+    if (target < 1e-9) target = prop === "dp" ? 10 : 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(target)));
+    const norm = target / mag;
+    const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    vmax = nice * mag;
+  }
+
+  // ---- draw cells
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const v = get(j * N + i) / vmax;
-    g.fillStyle = v <= 0.001 ? "#eef2f5" : turbo(v);
-    g.fillRect(20 + i * cs, 20 + (N - 1 - j) * cs, cs, cs);
+    const c = j * N + i;
+    const v = get(c) / vmax;
+    g.fillStyle = v <= 0.001 ? "#eef2f5" : turbo(Math.min(v, 1));
+    g.fillRect(x0 + i * cs, y0 + (N - 1 - j) * cs, cs + 0.5, cs + 0.5);
   }
-  // plume contour SG=0.01 cells outline (light) + wells
+
+  // ---- EPA Class VI plume contour at Sg ≥ 0.05 (SG and Mobile-Sg views)
+  if (contour) {
+    g.strokeStyle = "#000"; g.lineWidth = 1.8;
+    g.beginPath();
+    const thr = 0.05;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const c = j * N + i;
+      if (get(c) < thr) continue;
+      const px = x0 + i * cs, py = y0 + (N - 1 - j) * cs;
+      if (i === 0     || get(c - 1) < thr) { g.moveTo(px, py);      g.lineTo(px, py + cs); }
+      if (i === N - 1 || get(c + 1) < thr) { g.moveTo(px + cs, py); g.lineTo(px + cs, py + cs); }
+      if (j === 0     || get(c - N) < thr) { g.moveTo(px, py + cs); g.lineTo(px + cs, py + cs); }
+      if (j === N - 1 || get(c + N) < thr) { g.moveTo(px, py);      g.lineTo(px + cs, py); }
+    }
+    g.stroke();
+  }
+
+  // ---- map border
   g.strokeStyle = "#0b3954"; g.lineWidth = 1;
-  g.strokeRect(20, 20, N * cs, N * cs);
-  const toPx = (x, y) => [20 + x / p.L_m * N * cs, 20 + (1 - y / p.L_m) * N * cs];
+  g.strokeRect(x0, y0, gridSize, gridSize);
+
+  // ---- axes with km tick labels
+  const Lkm = p.L_m / 1000;
+  const nTicks = Lkm >= 8 ? 5 : 4;
+  g.fillStyle = "#000"; g.font = "11px Arial"; g.strokeStyle = "#444"; g.lineWidth = 1;
+  for (let t = 0; t <= nTicks; t++) {
+    const f = t / nTicks;
+    const xPx = x0 + f * gridSize;
+    const yPx = y0 + gridSize - f * gridSize;
+    const km = (f * Lkm).toFixed(Lkm >= 10 ? 0 : 1);
+    g.beginPath(); g.moveTo(xPx, y0 + gridSize); g.lineTo(xPx, y0 + gridSize + 4); g.stroke();
+    g.textAlign = "center"; g.fillText(km, xPx, y0 + gridSize + 16);
+    g.beginPath(); g.moveTo(x0 - 4, yPx); g.lineTo(x0, yPx); g.stroke();
+    g.textAlign = "right"; g.fillText(km, x0 - 6, yPx + 4);
+  }
+  g.textAlign = "center"; g.font = "11px Arial";
+  g.fillText("Easting (km)", x0 + gridSize / 2, y0 + gridSize + 34);
+  g.save(); g.translate(x0 - 40, y0 + gridSize / 2); g.rotate(-Math.PI / 2);
+  g.fillText("Northing (km)", 0, 0); g.restore();
+
+  // ---- wells & monitors
+  const toPx = (xm, ym) => [x0 + xm / p.L_m * gridSize, y0 + (1 - ym / p.L_m) * gridSize];
   for (const w of p.wells) {
     const [x, y] = toPx(w.x_m, w.y_m);
-    g.fillStyle = "red"; g.beginPath(); g.moveTo(x, y - 7); g.lineTo(x - 6, y + 5); g.lineTo(x + 6, y + 5); g.fill();
-    g.fillStyle = "#000"; g.font = "11px Arial"; g.fillText(w.name, x + 8, y);
+    g.strokeStyle = "#fff"; g.lineWidth = 2; g.fillStyle = "#d93025";
+    g.beginPath(); g.moveTo(x, y - 8); g.lineTo(x - 7, y + 5); g.lineTo(x + 7, y + 5); g.closePath();
+    g.fill(); g.stroke();
+    g.fillStyle = "#000"; g.textAlign = "left"; g.font = "bold 10px Arial";
+    g.fillText(w.name, x + 9, y - 1);
   }
   for (const mn of p.monitors) {
     const [x, y] = toPx(mn.x_m, mn.y_m);
-    g.fillStyle = "green"; g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill();
-    g.fillStyle = "#000"; g.fillText(mn.name, x + 8, y);
+    g.strokeStyle = "#fff"; g.lineWidth = 2; g.fillStyle = "#1e8e3e";
+    g.beginPath(); g.arc(x, y, 5, 0, 7); g.fill(); g.stroke();
+    g.fillStyle = "#000"; g.font = "10px Arial"; g.fillText(mn.name, x + 9, y + 4);
   }
-  // scale bar + colorbar
-  const km = 2000 / p.L_m * N * cs;
-  g.fillStyle = "#000"; g.fillRect(25, 30 + N * cs, km, 4);
-  g.font = "11px Arial"; g.fillText("2 km", 25 + km + 6, 37 + N * cs);
-  for (let i = 0; i < 200; i++) {
-    g.fillStyle = turbo(i / 200);
-    g.fillRect(40 + N * cs, 20 + (200 - i) * (N * cs) / 220, 16, (N * cs) / 200 + 1);
+
+  // ---- title
+  g.fillStyle = "#0b3954"; g.font = "bold 13px Arial"; g.textAlign = "left";
+  g.fillText(propName + kLab + " — Year " + sn.yr, x0, 20);
+
+  // ---- colorbar (right of map)
+  const cbX = x0 + gridSize + 22, cbY = y0, cbW = 20, cbH = gridSize;
+  for (let i = 0; i < cbH; i++) {
+    g.fillStyle = turbo(1 - i / cbH);
+    g.fillRect(cbX, cbY + i, cbW, 1);
   }
-  g.fillStyle = "#000";
-  g.fillText(vmax + "", 60 + N * cs, 30); g.fillText("0", 60 + N * cs, 22 + N * cs);
-  g.save(); g.translate(78 + N * cs, 20 + N * cs / 2); g.rotate(-Math.PI / 2);
-  g.textAlign = "center"; g.fillText(label + " — Year " + sn.yr, 0, 0); g.restore();
+  g.strokeStyle = "#0b3954"; g.lineWidth = 1; g.strokeRect(cbX, cbY, cbW, cbH);
+  // ticks
+  g.fillStyle = "#000"; g.font = "11px Arial"; g.textAlign = "left"; g.strokeStyle = "#444";
+  const fmt = v => vmax < 1 ? v.toFixed(2) : vmax < 10 ? v.toFixed(1) : vmax < 100 ? v.toFixed(0) : v.toFixed(0);
+  for (let t = 0; t <= 4; t++) {
+    const yPx = cbY + cbH - (t / 4) * cbH;
+    g.beginPath(); g.moveTo(cbX + cbW, yPx); g.lineTo(cbX + cbW + 4, yPx); g.stroke();
+    g.fillText(fmt((t / 4) * vmax), cbX + cbW + 6, yPx + 4);
+  }
+  // unit caption
+  g.font = "bold 11px Arial"; g.textAlign = "center";
+  g.fillText("(" + unit + ")", cbX + cbW / 2, cbY - 8);
+
+  // ---- EPA contour legend (below colorbar)
+  if (contour) {
+    const ly = cbY + cbH + 22;
+    g.strokeStyle = "#000"; g.lineWidth = 1.8;
+    g.beginPath(); g.moveTo(cbX - 2, ly); g.lineTo(cbX + cbW + 2, ly); g.stroke();
+    g.fillStyle = "#000"; g.font = "10px Arial"; g.textAlign = "left";
+    g.fillText("Sg ≥ 0.05", cbX - 4, ly + 14);
+    g.fillText("(EPA Class VI", cbX - 4, ly + 26);
+    g.fillText("plume bdry)", cbX - 4, ly + 38);
+  }
+
+  // ---- scale bar
+  const sbKm = Lkm >= 8 ? 2 : 1;
+  const sbPx = sbKm * 1000 / p.L_m * gridSize;
+  const sbY = y0 + gridSize + 48;
+  g.fillStyle = "#000"; g.fillRect(x0, sbY, sbPx, 3);
+  g.font = "11px Arial"; g.textAlign = "left";
+  g.fillText(sbKm + " km", x0 + sbPx + 6, sbY + 5);
 }
 function drawXs() {
   if (!SIM || !SNAPS.length) return;
@@ -1150,57 +1311,125 @@ function drawXs() {
   let wi, wj;
   if (SIM.is3D) { const ww = SIM.wells[+$("xsWell").value || 0]; wi = ww.i; wj = ww.j; }
   else { const wc = SIM.cellAt(w.x_m, w.y_m); wi = wc % N; wj = (wc / N) | 0; }
-  if (SIM.is3D) {                              // true 3D slice rendering
-    const NA = N * N, nz = sn.nz || SIM.NZ;
-    const W = cv.width - 80, Hc = 260, x0 = 50, y0 = 40, cw = W / N, ch = Hc / nz;
-    g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+
+  const W = cv.width - 180, Hc = 280, x0 = 60, y0 = 50;
+  const cw = W / N;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
+
+  // Caprock band
+  g.fillStyle = "#9c7c2c"; g.fillRect(x0, y0 - 8, W, 8);
+  g.fillStyle = "#5a3a0a"; g.font = "bold 10px Arial"; g.textAlign = "left";
+  g.fillText("CAPROCK (seal)", x0 + 6, y0 - 12);
+
+  if (SIM.is3D) {
+    const NA = N * N, nz = sn.nz || SIM.NZ, ch = Hc / nz;
     for (let k = 0; k < nz; k++) for (let s = 0; s < N; s++) {
       const c = dir === "x" ? k * NA + wj * N + s : k * NA + s * N + wi;
       const sg = sn.Sg[c];
-      g.fillStyle = sg <= 0.005 ? "#dce8f0" : turbo(sg / 0.8);
+      const v = sg / (1 - p.swi);
+      g.fillStyle = v <= 0.005 ? "#dce8f0" : turbo(Math.min(v, 1));
       g.fillRect(x0 + s * cw, y0 + k * ch, cw + 0.5, ch + 0.5);
     }
-    g.strokeStyle = "#0b3954"; g.strokeRect(x0, y0, W, Hc);
-    g.fillStyle = "#9c7c2c"; g.fillRect(x0, y0 - 6, W, 6);
-    g.fillStyle = "#555"; g.font = "11px Arial";
-    g.fillText(`${p.depth} m (top)`, 4, y0 + 8); g.fillText(`${p.depth + p.H} m`, 4, y0 + Hc);
-    g.fillText("Caprock", x0 + 6, y0 - 10);
-    const wpos = dir === "x" ? wi : wj;
-    g.strokeStyle = "red"; g.lineWidth = 2;
-    g.beginPath(); g.moveTo(x0 + (wpos + 0.5) * cw, y0 - 18); g.lineTo(x0 + (wpos + 0.5) * cw, y0 + Hc); g.stroke();
-    g.fillStyle = "red"; g.fillText(w.name, x0 + (wpos + 0.5) * cw + 4, y0 - 20);
-    g.fillStyle = "#000";
-    g.fillText(`${dir === "x" ? "W–E" : "S–N"} section through ${w.name} — Year ${sn.yr} — 3D Sg (per-layer)`, x0, cv.height - 12);
-    return;
-  }
-  const cells = [];
-  for (let s = 0; s < N; s++) cells.push(dir === "x" ? wj * N + s : s * N + wi);
-  const W = cv.width - 80, Hc = 260, x0 = 50, y0 = 40;
-  g.fillStyle = "#fff"; g.fillRect(0, 0, cv.width, cv.height);
-  g.fillStyle = "#dce8f0"; g.fillRect(x0, y0, W, Hc);                 // brine
-  const cw = W / N;
-  for (let s = 0; s < N; s++) {
-    const sg = sn.Sg[cells[s]], h = sg / (1 - p.swi) * Hc;            // VE column from top
-    if (h > 0.4) {
-      const grad = g.createLinearGradient(0, y0, 0, y0 + h);
-      grad.addColorStop(0, turbo(0.85)); grad.addColorStop(1, turbo(0.35));
-      g.fillStyle = grad; g.fillRect(x0 + s * cw, y0, cw + 0.5, h);
+    g.strokeStyle = "#0b3954"; g.lineWidth = 1; g.strokeRect(x0, y0, W, Hc);
+  } else {
+    // 2D VE sharp-interface reconstruction: CO2 column h = Sg*H / (1-Swi) from top
+    g.fillStyle = "#dce8f0"; g.fillRect(x0, y0, W, Hc);                  // brine background
+    const cells = [];
+    for (let s = 0; s < N; s++) cells.push(dir === "x" ? wj * N + s : s * N + wi);
+    const co2Color = "#d4622e";                                          // supercritical CO2 (orange)
+    for (let s = 0; s < N; s++) {
+      const sg = sn.Sg[cells[s]];
+      const h = sg / (1 - p.swi) * Hc;
+      if (h > 0.3) {
+        g.fillStyle = co2Color;
+        g.fillRect(x0 + s * cw, y0, cw + 0.5, h);
+      }
     }
+    // interface line
+    g.strokeStyle = "#0b3954"; g.lineWidth = 1.5;
+    g.beginPath();
+    let started = false;
+    for (let s = 0; s < N; s++) {
+      const sg = sn.Sg[cells[s]], h = sg / (1 - p.swi) * Hc;
+      const x = x0 + (s + 0.5) * cw;
+      if (h > 0.3) {
+        if (!started) { g.moveTo(x, y0 + h); started = true; }
+        else g.lineTo(x, y0 + h);
+      } else { started = false; }
+    }
+    g.stroke();
+    g.strokeStyle = "#0b3954"; g.lineWidth = 1; g.strokeRect(x0, y0, W, Hc);
   }
-  g.strokeStyle = "#0b3954"; g.strokeRect(x0, y0, W, Hc);
-  g.fillStyle = "#555"; g.font = "11px Arial";
-  g.fillText(`${p.depth} m (top)`, 4, y0 + 8); g.fillText(`${p.depth + p.H} m`, 4, y0 + Hc);
-  g.fillText("Caprock (Calmar)", x0 + 6, y0 - 8);
-  g.fillStyle = "#9c7c2c"; g.fillRect(x0, y0 - 6, W, 6);
+
+  // depth labels
+  g.fillStyle = "#555"; g.font = "11px Arial"; g.textAlign = "right";
+  g.fillText(`${p.depth} m`, x0 - 6, y0 + 8);
+  g.fillText(`${p.depth + p.H} m`, x0 - 6, y0 + Hc);
+  g.textAlign = "center"; g.save();
+  g.translate(x0 - 38, y0 + Hc / 2); g.rotate(-Math.PI / 2);
+  g.fillText("Depth (m TVD)", 0, 0); g.restore();
+
+  // distance axis with ticks (km)
+  const Lkm = p.L_m / 1000;
+  g.fillStyle = "#000"; g.strokeStyle = "#444"; g.font = "11px Arial";
+  for (let t = 0; t <= 4; t++) {
+    const f = t / 4, xPx = x0 + f * W;
+    g.beginPath(); g.moveTo(xPx, y0 + Hc); g.lineTo(xPx, y0 + Hc + 4); g.stroke();
+    g.textAlign = "center"; g.fillText((f * Lkm).toFixed(Lkm >= 10 ? 0 : 1), xPx, y0 + Hc + 16);
+  }
+  g.fillText("Distance (km) — " + (dir === "x" ? "W → E" : "S → N"), x0 + W / 2, y0 + Hc + 32);
+
   // well marker
   const wpos = dir === "x" ? wi : wj;
-  g.strokeStyle = "red"; g.lineWidth = 2;
-  g.beginPath(); g.moveTo(x0 + (wpos + 0.5) * cw, y0 - 18); g.lineTo(x0 + (wpos + 0.5) * cw, y0 + Hc); g.stroke();
-  g.fillStyle = "red"; g.fillText(w.name, x0 + (wpos + 0.5) * cw + 4, y0 - 20);
-  g.fillStyle = "#000";
-  g.fillText(`${dir === "x" ? "W–E" : "S–N"} section through ${w.name} — Year ${sn.yr} — CO2 column (VE reconstruction)`, x0, cv.height - 12);
-  g.fillText("0", x0 - 8, y0 + Hc + 14);
-  g.fillText((p.L_m / 1000).toFixed(0) + " km", x0 + W - 14, y0 + Hc + 14);
+  const wx = x0 + (wpos + 0.5) * cw;
+  g.strokeStyle = "#d93025"; g.lineWidth = 2.5;
+  g.beginPath(); g.moveTo(wx, y0 - 22); g.lineTo(wx, y0 + Hc); g.stroke();
+  g.fillStyle = "#d93025"; g.font = "bold 11px Arial"; g.textAlign = "left";
+  g.fillText(w.name, wx + 5, y0 - 24);
+
+  // Title
+  g.fillStyle = "#0b3954"; g.font = "bold 13px Arial"; g.textAlign = "left";
+  g.fillText(`${dir === "x" ? "W–E" : "S–N"} cross-section — ${w.name} — Year ${sn.yr}`, x0, 22);
+  g.fillStyle = "#555"; g.font = "11px Arial";
+  const vex = (Hc / p.H) / (W / p.L_m);
+  g.fillText(`${SIM.is3D ? "3D engine — per-layer Sg" : "2D VE — sharp-interface reconstruction (h = Sg·H/(1−Swi))"}  ·  Vertical exaggeration ${vex.toFixed(0)}×`,
+             x0, 38);
+
+  // Colorbar / legend (right side)
+  const lgX = x0 + W + 22;
+  if (SIM.is3D) {
+    const cbY = y0, cbW = 18, cbH = Hc;
+    for (let i = 0; i < cbH; i++) {
+      g.fillStyle = turbo(1 - i / cbH);
+      g.fillRect(lgX, cbY + i, cbW, 1);
+    }
+    g.strokeStyle = "#0b3954"; g.lineWidth = 1; g.strokeRect(lgX, cbY, cbW, cbH);
+    g.fillStyle = "#000"; g.font = "11px Arial"; g.textAlign = "left";
+    const sgMaxScale = (1 - p.swi);
+    for (let t = 0; t <= 4; t++) {
+      const yPx = cbY + cbH - (t / 4) * cbH;
+      g.beginPath(); g.moveTo(lgX + cbW, yPx); g.lineTo(lgX + cbW + 4, yPx); g.stroke();
+      g.fillText(((t / 4) * sgMaxScale).toFixed(2), lgX + cbW + 6, yPx + 4);
+    }
+    g.font = "bold 11px Arial"; g.textAlign = "center";
+    g.fillText("Sg (—)", lgX + cbW / 2, cbY - 8);
+  } else {
+    // VE legend: two swatches
+    g.fillStyle = "#d4622e"; g.fillRect(lgX, y0, 18, 16);
+    g.strokeStyle = "#0b3954"; g.strokeRect(lgX, y0, 18, 16);
+    g.fillStyle = "#000"; g.font = "11px Arial"; g.textAlign = "left";
+    g.fillText("CO₂ (free phase)", lgX + 24, y0 + 12);
+    g.fillStyle = "#dce8f0"; g.fillRect(lgX, y0 + 22, 18, 16);
+    g.strokeStyle = "#0b3954"; g.strokeRect(lgX, y0 + 22, 18, 16);
+    g.fillStyle = "#000"; g.fillText("Brine", lgX + 24, y0 + 34);
+    g.strokeStyle = "#0b3954"; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(lgX, y0 + 50); g.lineTo(lgX + 18, y0 + 50); g.stroke();
+    g.fillText("CO₂–brine interface", lgX + 24, y0 + 53);
+    g.font = "10px Arial"; g.fillStyle = "#555";
+    g.fillText("Sharp-interface", lgX, y0 + 78);
+    g.fillText("vertical-equilibrium", lgX, y0 + 92);
+    g.fillText("(Nordbotten–Celia 2005)", lgX, y0 + 106);
+  }
 }
 
 /* ---- charts ---- */
