@@ -784,13 +784,19 @@ class Sim3D {
           if (fg > 1e-12) xfer(c, n, fg * F * dts);
         }
         if (k < NZ - 1 && this.TT[c]) {
+          // Vertical face: c is shallower, n = c+NA is deeper, dz > 0 downward.
+          // Total flux is F_cn = T * (Φ_c - Φ_n), with phase potential Φ = P - ρ g z.
+          // For z positive-down, Φ_c - Φ_n = (P_c - P_n) + ρ g dz. The sign was flipped
+          // previously — that produced a spurious −2T·ρgdz upward flux at hydrostatic
+          // equilibrium, which pumped gas to the top regardless of buoyancy.
           const n = c + NA, T = this.TT[c];
           const rf = ((lg[c] + lg[n]) * this.rhoG + (lw[c] + lw[n]) * this.rhoB) /
                      (lg[c] + lg[n] + lw[c] + lw[n] + 1e-30);
-          const F = T * (this.P[c] - this.P[n] - rf * g * this.dz);
+          const F = T * (this.P[c] - this.P[n] + rf * g * this.dz);
           const up = F >= 0 ? c : n, fg = lg[up] / (lg[up] + lw[up] + 1e-30);
           if (fg > 1e-12) xfer(c, n, fg * F * dts);
-          // buoyant counter-current: gas up (n -> c)
+          // Buoyant counter-current (gas-up / brine-down differential) on top of
+          // the total advective flux. dRho = rhoB − rhoG > 0 for sc-CO2.
           const Tg = T / (0.5 * (lg[c] + lw[c]) + 0.5 * (lg[n] + lw[n]) + 1e-30);
           const lgw = lg[n] * lw[c] / (lg[n] + lw[c] + 1e-30);
           if (lgw > 1e-12) xfer(n, c, Tg * lgw * dRho * g * this.dz * dts);
