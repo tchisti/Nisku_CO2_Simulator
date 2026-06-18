@@ -1093,12 +1093,9 @@ function setupSliders() {
       `<option value="${nz - 1}">K${nz} (base)</option>`;
   }
 }
-$("mapK").onchange = () => drawMap();
-$("mapT").oninput = drawMap;
-$("mapProp").onchange = () => { updateMapCaption(); drawMap(); };
-updateMapCaption();
-$("xsT").oninput = drawXs; $("xsWell").onchange = drawXs; $("xsDir").onchange = drawXs;
-/* property captions: per-property physical interpretation shown below map controls */
+/* property captions: per-property physical interpretation shown below map controls
+   NOTE: must be declared BEFORE the event-handler block below so the initial
+   updateMapCaption() call at script load does not hit a const Temporal Dead Zone. */
 const MAP_CAPTIONS = {
   sg:   "Total gas saturation Sg (mobile + residually trapped, fraction of pore volume). Plume footprint per EPA 40 CFR 146.84 free-phase delineation.",
   sgm:  "Mobile (free-phase) gas Sg = Sg − S_gr(S_g,max), per Land (1968) hysteresis. This is the migrating plume the regulator cares about for plume-stabilization criterion (40 CFR 146.93).",
@@ -1109,6 +1106,11 @@ function updateMapCaption() {
   const el = $("mapCaption"); if (!el) return;
   el.textContent = MAP_CAPTIONS[$("mapProp").value] || "";
 }
+$("mapK").onchange = () => drawMap();
+$("mapT").oninput = drawMap;
+$("mapProp").onchange = () => { updateMapCaption(); drawMap(); };
+updateMapCaption();
+$("xsT").oninput = drawXs; $("xsWell").onchange = drawXs; $("xsDir").onchange = drawXs;
 
 function drawMap() {
   if (!SIM || !SNAPS.length) return;
