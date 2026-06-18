@@ -707,7 +707,22 @@ class Sim3D {
           yr = this.t / 365.25, g = 9.81;
     for (const w of this.wells) {
       const active = yr >= (w.startYr || 0) && yr < (w.stopYr ?? p.injYears);
-      if (!active) { w.q = 0; w.qk = new Float64Array(NZ); w.bhp = this.P[this.idx(w.i, w.j, 0)]; continue; }
+      if (!active) {
+        // Post-injection BHP: report max cell pressure across perforations, same
+        // semantic used during injection (`max(P[k] + qk/(WI·λ))`). With q=0 the
+        // Peaceman term vanishes naturally, so injection and shut-in BHP are now
+        // continuous. Previously this read P[k=0] (top layer only), producing a
+        // spurious ~400 kPa step-drop at shut-in equal to the hydrostatic
+        // gradient between gauge-controlling deep layer and the top.
+        w.q = 0; w.qk = new Float64Array(NZ);
+        let bhp = 0;
+        for (let k = 0; k < NZ; k++) {
+          const cP = this.P[this.idx(w.i, w.j, k)];
+          if (cP > bhp) bhp = cP;
+        }
+        w.bhp = bhp;
+        continue;
+      }
       const qMass = w.rate_MtYr * 1e9 / (365.25 * 86400);
       let q = qMass / this.rhoG;
       const lamE = p.krgmax / this.muG;
