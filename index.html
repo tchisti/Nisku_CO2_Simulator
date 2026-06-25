@@ -87,7 +87,7 @@ progress{width:260px;height:14px}
 <div><label>Sgr max (Land)</label><input id="sgr" type="number" step="0.01" value="0.12"></div>
 <div><label>krg max</label><input id="krg" type="number" step="0.01" value="0.80"></div>
 <div><label>Frac gradient (kPa/m)</label><input id="fg" type="number" value="20"></div>
-<div><label>Dissolution rate kd (/yr)</label><input id="kdiss" type="number" step="0.1" value="1.2"></div>
+<div><label>Convective dissolution kd (×, 1.2=ref)</label><input id="kdiss" type="number" step="0.1" value="1.2"></div>
 </div><div style="font-size:11px;color:#666;margin-top:4px">kd = first-order rate constant for approach to Duan-anchored equilibrium dissolved fraction (P-, T-, salinity-dependent). Default 1.2 /yr ≈ 0.6 yr half-time.</div></div>
 <div class="card"><h3>Schedule &amp; Boundary</h3><div class="grid3">
 <div><label>Injection (yr)</label><input id="injY" type="number" value="10"></div>
@@ -159,61 +159,61 @@ progress{width:260px;height:14px}
 <div class="card"><h3>1. Governing equations</h3>
 <p style="font-size:13px"><b>(1.1) Component mass conservation</b> for phase $\alpha \in \{g, w\}$ over depth-integrated cell volume:</p>
 <p>$$\frac{\partial}{\partial t}\!\left(\phi\, H\, \rho_\alpha\, S_\alpha\right) + \nabla \!\cdot\! \left(\rho_\alpha\, \mathbf{u}_\alpha\right) \;=\; q_\alpha \;\pm\; r_{diss}$$</p>
-<p style="font-size:13px;color:#444">Gas phase carries a dissolution sink $-r_{diss}$; brine phase carries the corresponding $+r_{diss}$. Code: <code>index.html:427–519</code> (VE), <code>:721–874</code> (3D).</p>
+<p style="font-size:13px;color:#444">Gas phase carries a dissolution sink $-r_{diss}$; brine phase carries the corresponding $+r_{diss}$. Code: <code>index.html:428–529</code> (VE), <code>:730–903</code> (3D).</p>
 
 <p style="font-size:13px"><b>(1.2) Multiphase Darcy</b>:</p>
 <p>$$\mathbf{u}_\alpha \;=\; -\frac{k\, k_{r\alpha}(S_g)}{\mu_\alpha}\bigl(\nabla P - \rho_\alpha g\, \nabla z\bigr)$$</p>
-<p style="font-size:13px;color:#444">Capillary pressure neglected at VE screening tier (typical CCS reservoirs at supercritical conditions: $P_c \ll \Delta P$). Code: pressure assembly <code>:372–425</code> (VE), <code>:652–719</code> (3D).</p>
+<p style="font-size:13px;color:#444">Capillary pressure neglected at VE screening tier (typical CCS reservoirs at supercritical conditions: $P_c \ll \Delta P$). Code: pressure assembly <code>:373–426</code> (VE), <code>:661–728</code> (3D).</p>
 
 <p style="font-size:13px"><b>(1.3) Vertical-equilibrium reduction</b> (Nordbotten–Celia 2005): assume vertical pressure gradient is hydrostatic in each phase and saturations stratify by gravity. CO₂ column thickness from the formation top:</p>
 <p>$$h(x,y,t) \;=\; \frac{S_g(x,y,t)\, H}{1 - S_{wi}}$$</p>
-<p style="font-size:13px;color:#444">Used for cross-section reconstruction (<code>:1348</code>) and gravity-spreading flux (<code>:484–497</code>).</p>
+<p style="font-size:13px;color:#444">Used for cross-section reconstruction (<code>:1374</code>) and gravity-spreading flux (<code>:485–500</code>).</p>
 
 <p style="font-size:13px"><b>(1.4) VE gravity spreading flux</b> (sharp-interface):</p>
 <p>$$F_{grav} \;=\; \frac{k\, k_{rg,\max}}{\mu_g}\,(\rho_w - \rho_g)\, g\, h\, \frac{\partial h}{\partial x}$$</p>
-<p style="font-size:13px;color:#444">Direct implementation at <code>:485–490</code>; stability-capped at 20% of cell pore volume per substep.</p>
+<p style="font-size:13px;color:#444">Direct implementation at <code>:491–493</code>; stability-capped at 20% of cell pore volume per substep.</p>
 </div>
 
 <div class="card"><h3>2. Constitutive models</h3>
 <table>
 <tr><th>Property</th><th>Model used</th><th>Code</th><th>Reference</th></tr>
-<tr><td>CO₂ density $\rho_g(P,T)$</td><td>Bilinear interpolation of a Span–Wagner-anchored table (8–30 MPa, 30–80 °C)</td><td><code>:270–290</code></td><td>Span &amp; Wagner 1996 <a href="#R-sw">[4]</a></td></tr>
-<tr><td>CO₂ viscosity $\mu_g(\rho)$</td><td>$\mu_g = (0.015 + 2{\cdot}10^{-5}\rho + 5.2{\cdot}10^{-8}\rho^2)\times 10^{-3}$ Pa·s</td><td><code>:291</code></td><td>Fenghour–Wakeham–Vesovic 1998 <a href="#R-fwv">[5]</a> fit</td></tr>
-<tr><td>Brine density $\rho_w(T, TDS)$</td><td>$\rho_w = 1000 - 0.40(T-20) + 7{\cdot}10^{-4}\,TDS$ kg/m³</td><td><code>:294</code></td><td>Batzle &amp; Wang 1992 <a href="#R-bw">[6]</a> screening fit</td></tr>
-<tr><td>Brine viscosity $\mu_w(T, TDS)$</td><td>Vogel–Tammann–Fulcher water + salinity correction</td><td><code>:295–298</code></td><td>Kestin et al. 1981 <a href="#R-kestin">[7]</a></td></tr>
-<tr><td>Equilibrium dissolved CO₂ fraction $w^{eq}_{CO_2}$</td><td>$0.050\,(P/12.3)^{0.55}\,[1-0.0045(T-55)]\,e^{-0.12 m}$ (kg/kg brine)</td><td><code>:300–305</code></td><td>Duan &amp; Sun 2003 <a href="#R-duan">[8]</a> anchored</td></tr>
-<tr><td>Rel-perm $k_{rg}, k_{rw}$</td><td>VE: linear; 3D: Corey ($n_g{=}2$, $n_w{=}4$); $S_e = (S_g - S_{gr})/(1 - S_{wi} - S_{gr})$</td><td><code>:362–367</code>, <code>:643–648</code></td><td>Brooks &amp; Corey 1964 <a href="#R-bc">[9]</a></td></tr>
-<tr><td>Residual gas trapping $S_{gr}(S_{g,\max})$</td><td>$S_{gr} = S_{g,\max}/(1 + C\, S_{g,\max})$, $C = 1/S_{gr,\max} - 1/(1-S_{wi})$</td><td><code>:342</code>, <code>:356–361</code></td><td>Land 1968 <a href="#R-land">[10]</a></td></tr>
+<tr><td>CO₂ density $\rho_g(P,T)$</td><td>Bilinear interpolation of a Span–Wagner-anchored table (8–30 MPa, 30–80 °C)</td><td><code>:271–290</code></td><td>Span &amp; Wagner 1996 <a href="#R-sw">[4]</a></td></tr>
+<tr><td>CO₂ viscosity $\mu_g(\rho)$</td><td>$\mu_g = (0.015 + 2{\cdot}10^{-5}\rho + 5.2{\cdot}10^{-8}\rho^2)\times 10^{-3}$ Pa·s</td><td><code>:292</code></td><td>Fenghour–Wakeham–Vesovic 1998 <a href="#R-fwv">[5]</a> fit</td></tr>
+<tr><td>Brine density $\rho_w(T, TDS)$</td><td>$\rho_w = 1000 - 0.40(T-20) + 7{\cdot}10^{-4}\,TDS$ kg/m³</td><td><code>:295</code></td><td>Batzle &amp; Wang 1992 <a href="#R-bw">[6]</a> screening fit</td></tr>
+<tr><td>Brine viscosity $\mu_w(T, TDS)$</td><td>Vogel–Tammann–Fulcher water + salinity correction</td><td><code>:296–299</code></td><td>Kestin et al. 1981 <a href="#R-kestin">[7]</a></td></tr>
+<tr><td>Equilibrium dissolved CO₂ fraction $w^{eq}_{CO_2}$</td><td>$0.050\,(P/12.3)^{0.55}\,[1-0.0045(T-55)]\,e^{-0.12 m}$ (kg/kg brine)</td><td><code>:301–306</code></td><td>Duan &amp; Sun 2003 <a href="#R-duan">[8]</a> anchored</td></tr>
+<tr><td>Rel-perm $k_{rg}, k_{rw}$</td><td>VE: linear; 3D: Corey ($n_g{=}2$, $n_w{=}4$); $S_e = (S_g - S_{gr})/(1 - S_{wi} - S_{gr})$</td><td><code>:363–368</code>, <code>:652–657</code></td><td>Brooks &amp; Corey 1964 <a href="#R-bc">[9]</a></td></tr>
+<tr><td>Residual gas trapping $S_{gr}(S_{g,\max})$</td><td>$S_{gr} = S_{g,\max}/(1 + C\, S_{g,\max})$, $C = 1/S_{gr,\max} - 1/(1-S_{wi})$</td><td><code>:343</code>, <code>:357–362</code></td><td>Land 1968 <a href="#R-land">[10]</a></td></tr>
 </table>
 </div>
 
 <div class="card"><h3>3. Trapping mechanisms (IPCC SRCCS classification)</h3>
 <table>
 <tr><th>#</th><th>Mechanism</th><th>Equation / criterion</th><th>This simulator</th></tr>
-<tr><td>1</td><td>Structural / stratigraphic</td><td>Caprock seal capacity vs. column buoyancy: $\Delta P_{buoy} = (\rho_w - \rho_g)\,g\,h_{col} < P_{e,seal}$; injection BHP $< 90\%\, P_{frac}$</td><td><b>Implicit</b> — closed-boundary option + fracture-pressure compliance check at <code>:348</code>, <code>:1105–1108</code></td></tr>
-<tr><td>2</td><td>Residual (capillary) trapping</td><td>Land (1968) hysteresis, eq. above; $S_{gr,\max}$ user input (default 0.12)</td><td><b>Active</b> — <code>:342</code>, <code>:356–361</code>, <code>:527–529</code></td></tr>
-<tr><td>3</td><td>Solubility (dissolution) trapping</td><td>$\dot m_{diss} \;=\; k_d \bigl[w^{eq}_{CO_2}(P_c, T, m_{salt})\, m_{brine,c} - m_{diss,c}\bigr]$, capped by free gas mass; $w^{eq}$ re-evaluated each step at <i>current cell pressure</i></td><td><b>Active</b> — <code>:506–517</code> (VE), <code>:866–874</code> (3D); $k_d$ user-tunable (Setup tab)</td></tr>
+<tr><td>1</td><td>Structural / stratigraphic</td><td>Caprock seal capacity vs. column buoyancy: $\Delta P_{buoy} = (\rho_w - \rho_g)\,g\,h_{col} < P_{e,seal}$; injection BHP $< 90\%\, P_{frac}$</td><td><b>Implicit</b> — closed-boundary option + fracture-pressure compliance check at <code>:349</code>, <code>:1131–1134</code></td></tr>
+<tr><td>2</td><td>Residual (capillary) trapping</td><td>Land (1968) hysteresis, eq. above; $S_{gr,\max}$ user input (default 0.12)</td><td><b>Active</b> — <code>:343</code>, <code>:357–362</code>, <code>:536–538</code></td></tr>
+<tr><td>3</td><td>Solubility (dissolution) trapping</td><td>$\dot m_{diss} \;=\; \alpha\,\dfrac{k_v\,\Delta\rho_c\,g}{\mu_w}\,C_{sat}\,A_{cell}$ — convection-limited (Rayleigh) flux at the gas–brine contact, $\alpha = 0.017$ (steady Sherwood), $C_{sat} = w^{eq}_{CO_2}\rho_w$, $\Delta\rho_c \approx 0.3\,C_{sat}$; capped by free-gas mass and full-column brine capacity; $w^{eq}$ re-evaluated each step at <i>current cell pressure</i></td><td><b>Active</b> — <code>:509–526</code> (VE), <code>:875–898</code> (3D); $k_d$ knob scales $\alpha$</td></tr>
 <tr><td>4</td><td>Mineral trapping (carbonate precipitation)</td><td>$\mathrm{CO_2(aq) + H_2O + Ca^{2+} \rightarrow CaCO_3 + 2H^+}$ on $10^2$–$10^4$ yr timescale</td><td><b>Not modeled</b> — out of scope for ≤100 yr screening; use TOUGHREACT / GEM-GHG for kinetics</td></tr>
 </table>
-<p style="font-size:12px;color:#666;margin-top:6px">Framework: IPCC (2005) <a href="#R-ipcc">[11]</a>; trapping inventory accounting follows Bachu (2015) <a href="#R-bachu">[12]</a>. Mass-balance partitioning of free / residual / dissolved is reported at <code>:527–543</code> and rendered on the Time-Series tab.</p>
+<p style="font-size:12px;color:#666;margin-top:6px">Framework: IPCC (2005) <a href="#R-ipcc">[11]</a>; trapping inventory accounting follows Bachu (2015) <a href="#R-bachu">[12]</a>. Mass-balance partitioning of free / residual / dissolved is reported at <code>:536–552</code> and rendered on the Time-Series tab.</p>
 </div>
 
 <div class="card"><h3>4. Numerical scheme</h3>
 <table>
 <tr><th>Stage</th><th>Method</th><th>Code</th></tr>
-<tr><td>Pressure</td><td>Fully implicit IMPES with total-mobility weighting on cell faces (harmonic $k$, arithmetic $\lambda_T$); preconditioned conjugate gradient (Jacobi), tol $10^{-12}$ rel.</td><td><code>:372–425</code>, <code>:652–719</code></td></tr>
-<tr><td>Transport</td><td>Explicit upwind fractional-flow $f_g = \lambda_g/(\lambda_g+\lambda_w)$ on cell-centered finite volumes</td><td><code>:462–505</code>, <code>:804–863</code></td></tr>
-<tr><td>CFL substepping</td><td>$\Delta t_{sub} = \Delta t / n_{sub}$, with $n_{sub} = \lceil \max_c |\sum_n T_{cn}(P_c-P_n)|\,\Delta t / (0.25\, V_{p,c}) \rceil$</td><td><code>:451–468</code></td></tr>
-<tr><td>Gravity spreading</td><td>VE: sharp-interface buoyant flux capped at 20% of $V_p$ per substep. 3D: counter-current buoyancy with mobility-weighted face density</td><td><code>:484–497</code>, <code>:818–837</code></td></tr>
-<tr><td>Well model</td><td>Peaceman (1978) <a href="#R-peace">[13]</a> well index $WI = 2\pi k H\,\mathrm{NTG}/\ln(0.2\,\Delta x/r_w)$; rate target with BHP cap; 3D engine distributes by layer-WI</td><td><code>:435–447</code>, <code>:608–627</code>, <code>:742–761</code></td></tr>
-<tr><td>Mass-balance closure</td><td>$MBE\% = 100 (m_{free}+m_{trap}+m_{diss}-m_{inj})/m_{inj}$; compliance target $|MBE| < 1\%$</td><td><code>:543</code>, <code>:905</code></td></tr>
+<tr><td>Pressure</td><td>Fully implicit IMPES with total-mobility weighting on cell faces (harmonic $k$, arithmetic $\lambda_T$); preconditioned conjugate gradient (Jacobi), tol $10^{-12}$ rel.</td><td><code>:373–426</code>, <code>:661–728</code></td></tr>
+<tr><td>Transport</td><td>Explicit upwind fractional-flow $f_g = \lambda_g/(\lambda_g+\lambda_w)$ on cell-centered finite volumes</td><td><code>:472–507</code>, <code>:813–873</code></td></tr>
+<tr><td>CFL substepping</td><td>$\Delta t_{sub} = \Delta t / n_{sub}$, with $n_{sub} = \lceil \max_c |\sum_n T_{cn}(P_c-P_n)|\,\Delta t / (0.25\, V_{p,c}) \rceil$</td><td><code>:452–469</code></td></tr>
+<tr><td>Gravity spreading</td><td>VE: sharp-interface buoyant flux capped at 20% of $V_p$ per substep. 3D: counter-current buoyancy with mobility-weighted face density</td><td><code>:485–500</code>, <code>:827–846</code></td></tr>
+<tr><td>Well model</td><td>Peaceman (1978) <a href="#R-peace">[13]</a> well index $WI = 2\pi k H\,\mathrm{NTG}/\ln(0.2\,\Delta x/r_w)$; rate target with BHP cap; 3D engine distributes by layer-WI</td><td><code>:436–448</code>, <code>:632–636</code>, <code>:753–770</code></td></tr>
+<tr><td>Mass-balance closure</td><td>$MBE\% = 100 (m_{free}+m_{trap}+m_{diss}-m_{inj})/m_{inj}$; compliance target $|MBE| < 1\%$</td><td><code>:552</code>, <code>:931</code></td></tr>
 </table>
 </div>
 
 <div class="card"><h3>5. Far-field pressure (Theis 1935)</h3>
 <p style="font-size:13px">Beyond the grid, single-phase brine pressure transient is approximated by the Theis solution to bracket the AoR pressure-front radius (criterion: $\Delta P > 10$ kPa per 40 CFR 146.84(c)(1)):</p>
 <p>$$\Delta P(r,t) \;=\; \frac{Q\,\mu_w}{4\pi\, k\, H_{eff}}\, W(u), \qquad u \;=\; \frac{r^2\,\phi\,\mu_w\,c_t}{4\,k\,t}, \qquad W(u) \approx -\gamma - \ln u$$</p>
-<p style="font-size:13px;color:#444">Total compressibility $c_t = c_r + c_w \approx c_r + 4.6{\cdot}10^{-10}$ Pa⁻¹. Implemented at <code>:566–580</code>; results enter the regulatory AoR table.</p>
+<p style="font-size:13px;color:#444">Total compressibility $c_t = c_r + c_w \approx c_r + 4.6{\cdot}10^{-10}$ Pa⁻¹. Implemented at <code>:575–588</code>; results enter the regulatory AoR table.</p>
 </div>
 
 <div class="card"><h3>6. Regulatory acceptance &amp; honest limits</h3>
@@ -221,7 +221,7 @@ progress{width:260px;height:14px}
 <p style="font-size:13px"><b>Limits this model does not cover</b> (use full compositional 3D + geomechanics for these):</p>
 <ul style="font-size:13px;line-height:1.55">
 <li>Capillary heterogeneity below grid scale (sub-seismic shale baffles) — handled via NTG &amp; heterogeneity ±% knob only</li>
-<li>Density-driven convective dissolution (Ennis-King &amp; Paterson 2005). VE-class models compute dissolution at the gas–brine contact but do not resolve the downward convective fingering of CO₂-saturated brine. Late-time dissolved-CO₂ mass and footprint are therefore <i>lower bounds</i>; for centennial-scale dissolved spreading, use TOUGH2 / CMG-GEM with a Rayleigh-criterion mesh.</li>
+<li>Density-driven convective dissolution (Ennis-King &amp; Paterson 2005 <a href="#R-ekp">[16]</a>) is approximated by a steady Rayleigh flux at the gas–brine contact (§3), capped by the full-column brine capacity — it does <i>not</i> resolve individual descending CO₂-saturated fingers or the lateral spreading of the dense-brine footprint. For centennial-scale dissolved-plume migration, use TOUGH2 / CMG-GEM with a Rayleigh-criterion mesh.</li>
 <li>Non-isothermal effects (Joule-Thomson cooling near wellbore)</li>
 <li>Mineral trapping kinetics (10²–10⁴ yr)</li>
 <li>Geomechanical caprock failure / induced seismicity — covered by fracture-pressure compliance check only</li>
@@ -249,6 +249,7 @@ progress{width:260px;height:14px}
 <li id="R-epa"><b>US EPA</b> (2010, 2013). Federal Requirements Under the UIC Program for CO₂ Geologic Sequestration Wells (40 CFR Parts 124, 144, 145, 146, 147 — Class VI); <i>Geologic Sequestration of Carbon Dioxide: Underground Injection Control (UIC) Program Class VI Well Area of Review Evaluation and Corrective Action Guidance</i>, EPA 816-R-13-005.</li>
 <li id="R-aer"><b>Alberta Energy Regulator</b> (2017). <i>Directive 065: Resources Applications for Oil and Gas Reservoirs</i>. AER, Calgary, AB.</li>
 <li id="R-aziz"><b>Aziz, K., Settari, A.</b> (1979). <i>Petroleum Reservoir Simulation</i>. Applied Science Publishers. — IMPES, transmissibility, numerics.</li>
+<li id="R-ekp"><b>Ennis-King, J., Paterson, L.</b> (2005). Role of convective mixing in the long-term storage of carbon dioxide in deep saline formations. <i>SPE Journal</i> 10(3), 349–356. — Convective (Rayleigh) dissolution flux.</li>
 </ol>
 <p style="font-size:11px;color:#888;margin-top:10px">Engine identity for the audit trail: <b>SubsurfaceAI VE / 3D Layered Engine</b> · pure-JS implementation · MIT-style license · lineage MRST-co2lab (academic open source). Git: <code>github.com/tchisti/Nisku_CO2_Simulator</code>.</p>
 </div>
@@ -482,7 +483,9 @@ class VESim {
           const Fg = fg * F;
           dS[c] -= Fg * dts / this.Vp[c]; dS[n] += Fg * dts / this.Vp[n];
           // VE gravity spreading: flux ~ k*krg*dRho*g/muG * d(h)/dx * h_face * dy * phi-free
-          const hC = this.Sg[c] / (1 - p.swi) * p.H, hN = this.Sg[n] / (1 - p.swi) * p.H;
+          // buoyant spreading is driven by the MOBILE CO2 column only — residually
+          // trapped (immobile) gas can't flow, so use mobile(c), not total Sg[c].
+          const hC = this.mobile(c) / (1 - p.swi) * p.H, hN = this.mobile(n) / (1 - p.swi) * p.H;
           if (hC > 0 || hN > 0) {
             const kf = 2 * this.k[c] * this.k[n] / (this.k[c] + this.k[n] + 1e-30);
             const Fgr = kf * p.krgmax / this.muG * gravC *
@@ -503,17 +506,23 @@ class VESim {
         if (this.Sg[c] > this.SgMax[c]) this.SgMax[c] = this.Sg[c];
       }
     }
-    // dissolution: rate-limited approach to Duan-anchored equilibrium evaluated at current cell P
-    // kd = first-order rate constant (1/yr); per-step fraction of deficit = kd * dtDays/365.25
-    const kd = (p.kDiss_perYr ?? 1.2);
-    const frac = kd * dtDays / 365.25;
+    // dissolution: convection-limited (Rayleigh) flux at the gas-brine contact.
+    // Long-term convective dissolution proceeds at a ~constant CO2 flux per unit
+    // interface area F = a*(kv*dRhoC*g/muB)*Csat (Ennis-King & Paterson 2005),
+    // NOT instantaneous equilibration of the whole column (the old model dissolved
+    // the plume away in a few years once it spread thin). Full-column brine remains
+    // the ceiling. a=0.017 (steady Sherwood); kd knob scales it (kd/1.2 -> 1 default).
+    const aConv = 0.017 * (p.kDiss_perYr ?? 1.2) / 1.2;
     for (let c = 0; c < this.NC; c++) {
-      if (this.Sg[c] <= 0 && this.mDiss[c] <= 0) continue;
-      const brineMass = this.Vp[c] * (1 - this.Sg[c]) * this.rhoB;
+      if (this.Sg[c] <= 1e-9) continue;
       const wEqC = BrineProps.wCO2eq(this.P[c] / 1e3, p.T_C, p.tds_ppm);
-      const cap = Math.max(brineMass * wEqC - this.mDiss[c], 0);
+      const Csat = wEqC * this.rhoB;                 // kg CO2 / m3 saturated brine
+      const dRhoC = 0.3 * Csat;                      // brine density increase at saturation
+      const kv = this.k[c] * (p.kvkh || 0.155);      // vertical perm drives convection
+      const Fconv = aConv * kv * dRhoC * 9.81 / this.muB * Csat;   // kg/m2/s
+      const colCap = Math.max(this.Vp[c] * (1 - this.Sg[c]) * this.rhoB * wEqC - this.mDiss[c], 0);
       const avail = this.Sg[c] * this.Vp[c] * this.rhoG;
-      const dm = Math.min(cap * frac, avail);
+      const dm = Math.min(Fconv * this.dx * this.dx * dt, colCap, avail);
       if (dm > 0) { this.mDiss[c] += dm; this.Sg[c] -= dm / (this.Vp[c] * this.rhoG); }
     }
     this.t += dtDays;
@@ -863,15 +872,32 @@ class Sim3D {
         this.warnings.push(`Yr ${(this.t / 365.25).toFixed(1)}: ${w.name} volumetrically limited`);
       }
     }
-    // dissolution: per-cell P-dependent equilibrium, first-order approach (Duan-anchored)
-    const kd = (p.kDiss_perYr ?? 1.2);
-    const frac = kd * dtDays / 365.25;
-    for (const c of act) {
-      if (this.Sg[c] <= 0) continue;
-      const wEqC = BrineProps.wCO2eq(this.P[c] / 1e3, p.T_C, p.tds_ppm);
-      const cap = Math.max(this.Vp[c] * (1 - this.Sg[c]) * this.rhoB * wEqC - this.mDiss[c], 0);
-      const dm = Math.min(cap * frac, this.Sg[c] * this.Vp[c] * this.rhoG);
-      if (dm > 0) { this.mDiss[c] += dm; this.Sg[c] -= dm / (this.Vp[c] * this.rhoG); }
+    // dissolution: convection-limited (Rayleigh) flux at the gas-brine contact,
+    // applied once per (i,j) column (one dissolution front per column, at the base
+    // of the gas accumulation) rather than per cell. F = a*(kv*dRhoC*g/muB)*Csat
+    // (Ennis-King & Paterson 2005); full-column brine is the ceiling.
+    const aConv = 0.017 * (p.kDiss_perYr ?? 1.2) / 1.2;
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      let colGas = 0, colCap = 0, kFront = -1;
+      for (let k = 0; k < NZ; k++) {
+        const c = k * NA + j * N + i;
+        const wEqK = BrineProps.wCO2eq(this.P[c] / 1e3, p.T_C, p.tds_ppm);
+        colCap += Math.max(this.Vp[c] * (1 - this.Sg[c]) * this.rhoB * wEqK - this.mDiss[c], 0);
+        if (this.Sg[c] > 1e-9) { colGas += this.Sg[c] * this.Vp[c] * this.rhoG; kFront = k; }
+      }
+      if (kFront < 0 || colGas <= 0) continue;
+      const cF = kFront * NA + j * N + i;
+      const wEqC = BrineProps.wCO2eq(this.P[cF] / 1e3, p.T_C, p.tds_ppm);
+      const Csat = wEqC * this.rhoB, dRhoC = 0.3 * Csat;
+      const Fconv = aConv * this.kv[cF] * dRhoC * 9.81 / this.muB * Csat;   // kg/m2/s
+      const dmCol = Math.min(Fconv * this.dx * this.dx * dt, colCap, colGas);
+      if (dmCol <= 0) continue;
+      for (let k = 0; k <= kFront; k++) {
+        const c = k * NA + j * N + i;
+        if (this.Sg[c] <= 1e-9) continue;
+        const dm = dmCol * (this.Sg[c] * this.Vp[c] * this.rhoG) / colGas;
+        this.mDiss[c] += dm; this.Sg[c] -= dm / (this.Vp[c] * this.rhoG);
+      }
     }
     this.t += dtDays;
   }
